@@ -1,0 +1,153 @@
+==18981== Memcheck, a memory error detector
+==18981== Copyright (C) 2002-2022, and GNU GPL'd, by Julian Seward et al.
+==18981== Using Valgrind-3.22.0 and LibVEX; rerun with -h for copyright info
+==18981== Command: /tmp/claude-0/-home-user/dd840cd2-9be9-565f-8576-aec3cbf7dee6/scratchpad/build-dbg/ccx_2.23_pardiso -i m
+==18981== Parent PID: 18980
+==18981== 
+==18981== realloc() with size 0
+==18981==    at 0x863DB80: realloc (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==18981==    by 0x41A831: u_realloc (u_realloc.c:35)
+==18981==    by 0x31FD77: inicont (inicont.c:109)
+==18981==    by 0x34A6C1: nonlingeo (nonlingeo.c:3339)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981==  Address 0x9fc7c60 is 0 bytes inside a block of size 47,616 alloc'd
+==18981==    at 0x863D953: calloc (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==18981==    by 0x41A56B: u_calloc (u_calloc.c:41)
+==18981==    by 0x31FB9D: inicont (inicont.c:92)
+==18981==    by 0x34A6C1: nonlingeo (nonlingeo.c:3339)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981== 
+==18981== realloc() with size 0
+==18981==    at 0x863DB80: realloc (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==18981==    by 0x41A831: u_realloc (u_realloc.c:35)
+==18981==    by 0x31FDAA: inicont (inicont.c:110)
+==18981==    by 0x34A6C1: nonlingeo (nonlingeo.c:3339)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981==  Address 0xa0265c0 is 0 bytes inside a block of size 47,616 alloc'd
+==18981==    at 0x863D953: calloc (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==18981==    by 0x41A56B: u_calloc (u_calloc.c:41)
+==18981==    by 0x31FBCC: inicont (inicont.c:93)
+==18981==    by 0x34A6C1: nonlingeo (nonlingeo.c:3339)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981== 
+==18981== Invalid read of size 4
+==18981==    at 0x5DD9E0: slavintpoints_ (slavintpoints.f:298)
+==18981==    by 0x3B7E6B: precontact (precontact.c:142)
+==18981==    by 0x35B717: nonlingeo (nonlingeo.c:7790)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981==  Address 0xa0ce32c is 4 bytes before a block of size 288 alloc'd
+==18981==    at 0x8636828: malloc (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==18981==    by 0x5DC2CB: slavintpoints_ (slavintpoints.f:44)
+==18981==    by 0x3B7E6B: precontact (precontact.c:142)
+==18981==    by 0x35B717: nonlingeo (nonlingeo.c:7790)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981== 
+==18981== Invalid read of size 4
+==18981==    at 0x7E2D30: sutherland_hodgman_ (sutherland_hodgman.f:124)
+==18981==    by 0x6097D2: treatmasterface_ (treatmasterface.f:65)
+==18981==    by 0x5DDE01: slavintpoints_ (slavintpoints.f:346)
+==18981==    by 0x3B7E6B: precontact (precontact.c:142)
+==18981==    by 0x35B717: nonlingeo (nonlingeo.c:7790)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981==  Address 0xa0cdf84 is 12 bytes before a block of size 864 alloc'd
+==18981==    at 0x8636828: malloc (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==18981==    by 0x5DC28A: slavintpoints_ (slavintpoints.f:43)
+==18981==    by 0x3B7E6B: precontact (precontact.c:142)
+==18981==    by 0x35B717: nonlingeo (nonlingeo.c:7790)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981== 
+==18981== Invalid read of size 4
+==18981==    at 0x7E2D30: sutherland_hodgman_ (sutherland_hodgman.f:124)
+==18981==    by 0x6097D2: treatmasterface_ (treatmasterface.f:65)
+==18981==    by 0x5DF39E: slavintpoints_ (slavintpoints.f:670)
+==18981==    by 0x3B7E6B: precontact (precontact.c:142)
+==18981==    by 0x35B717: nonlingeo (nonlingeo.c:7790)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981==  Address 0xa170fb4 is 12 bytes before a block of size 864 alloc'd
+==18981==    at 0x8636828: malloc (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==18981==    by 0x5DC28A: slavintpoints_ (slavintpoints.f:43)
+==18981==    by 0x3B7E6B: precontact (precontact.c:142)
+==18981==    by 0x35B717: nonlingeo (nonlingeo.c:7790)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981== 
+==18981== Invalid read of size 8
+==18981==    at 0x356939: nonlingeo (nonlingeo.c:6741)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981==  Address 0xa950358 is 8 bytes inside a block of size 14,496 free'd
+==18981==    at 0x863988F: free (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==18981==    by 0x41A675: u_free (u_free.c:34)
+==18981==    by 0x385F35: nonlingeo (nonlingeo.c:13578)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981==  Block was alloc'd at
+==18981==    at 0x8636828: malloc (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==18981==    by 0x41A730: u_malloc (u_malloc.c:42)
+==18981==    by 0x373660: nonlingeo (nonlingeo.c:11293)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981== 
+==18981== Invalid read of size 8
+==18981==    at 0x35698A: nonlingeo (nonlingeo.c:6741)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981==  Address 0xa950358 is 8 bytes inside a block of size 14,496 free'd
+==18981==    at 0x863988F: free (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==18981==    by 0x41A675: u_free (u_free.c:34)
+==18981==    by 0x385F35: nonlingeo (nonlingeo.c:13578)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981==  Block was alloc'd at
+==18981==    at 0x8636828: malloc (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==18981==    by 0x41A730: u_malloc (u_malloc.c:42)
+==18981==    by 0x373660: nonlingeo (nonlingeo.c:11293)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981== 
+==18981== Invalid read of size 4
+==18981==    at 0x5DEF11: slavintpoints_ (slavintpoints.f:612)
+==18981==    by 0x3B7E6B: precontact (precontact.c:142)
+==18981==    by 0x35B717: nonlingeo (nonlingeo.c:7790)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981==  Address 0xa994f2c is 4 bytes before a block of size 288 alloc'd
+==18981==    at 0x8636828: malloc (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==18981==    by 0x5DC2CB: slavintpoints_ (slavintpoints.f:44)
+==18981==    by 0x3B7E6B: precontact (precontact.c:142)
+==18981==    by 0x35B717: nonlingeo (nonlingeo.c:7790)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981== 
+==18981== Invalid read of size 4
+==18981==    at 0x607A71: totalcontact_ (totalcontact.f:129)
+==18981==    by 0x3D96FC: remastruct (remastruct.c:95)
+==18981==    by 0x35CDDE: nonlingeo (nonlingeo.c:8031)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981==  Address 0xb666c38 is 9,464 bytes inside an unallocated block of size 9,616 in arena "client"
+==18981== 
+==18981== Invalid read of size 8
+==18981==    at 0x607C23: totalcontact_ (totalcontact.f:151)
+==18981==    by 0x3D96FC: remastruct (remastruct.c:95)
+==18981==    by 0x35CDDE: nonlingeo (nonlingeo.c:8031)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981==  Address 0xc1d9bd0 is 16 bytes after a block of size 141,456 alloc'd
+==18981==    at 0x863DB80: realloc (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==18981==    by 0x41A831: u_realloc (u_realloc.c:35)
+==18981==    by 0x35B7E3: nonlingeo (nonlingeo.c:7802)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981== 
+==18981== Thread 2:
+==18981== Invalid read of size 8
+==18981==    at 0x74DF9B: interpolateinface_ (interpolateinface.f:92)
+==18981==    by 0x65A92D: interpolatestatemainmt (interpolatestatemain.c:150)
+==18981==    by 0x8D30AA3: start_thread (pthread_create.c:447)
+==18981==    by 0x8DBDA63: clone (clone.S:100)
+==18981==  Address 0xab91398 is 0 bytes after a block of size 70,728 alloc'd
+==18981==    at 0x863D953: calloc (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==18981==    by 0x41A56B: u_calloc (u_calloc.c:41)
+==18981==    by 0x35B4F5: nonlingeo (nonlingeo.c:7776)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981== 
+==18981== Invalid read of size 8
+==18981==    at 0x74DFCF: interpolateinface_ (interpolateinface.f:93)
+==18981==    by 0x65A92D: interpolatestatemainmt (interpolatestatemain.c:150)
+==18981==    by 0x8D30AA3: start_thread (pthread_create.c:447)
+==18981==    by 0x8DBDA63: clone (clone.S:100)
+==18981==  Address 0xab913a0 is 8 bytes after a block of size 70,728 alloc'd
+==18981==    at 0x863D953: calloc (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==18981==    by 0x41A56B: u_calloc (u_calloc.c:41)
+==18981==    by 0x35B4F5: nonlingeo (nonlingeo.c:7776)
+==18981==    by 0x12C222: main (ccx_2.23.c:1300)
+==18981== 

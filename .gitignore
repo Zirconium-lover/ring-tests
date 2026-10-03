@@ -13,3 +13,5 @@ literature/**/*.pdf
 # журналы прогонов большие; итоги переносятся в notes/
 runs/**/run.log
 runs/**/m.cvg
+runs/**/m.inp
+runs/**/m.de1stats
