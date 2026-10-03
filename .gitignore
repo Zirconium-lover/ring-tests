@@ -1,0 +1,9 @@
+# большие результаты расчётов не храним
+*.frd
+*.12d
+*.cvg
+*.de1.vtk
+runs/**/m.dat
+runs/**/*.out
+_scratch/
+__pycache__/
