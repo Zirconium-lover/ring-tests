@@ -7,3 +7,6 @@ runs/**/m.dat
 runs/**/*.out
 _scratch/
 __pycache__/
+# статьи (PDF) не кладём: репозиторий публичный
+literature/**/*.pdf
+*.pdf
