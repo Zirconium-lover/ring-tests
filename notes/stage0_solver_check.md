@@ -35,8 +35,27 @@ rc = 134 — `free(): invalid next size (normal)`, rc = 139 — segfault.
    (`[DAMAGE DE1.3 TERMINAL] inc=22 new_terminal=12 …
    action=reuse-sparse-graph+same-load-Newton`), независимо от трения,
    кэширования PARDISO, постепенного удаления и режима топологии.
-   Стек (gdb, release): `free()` ← `u_free` ← `remastruct` ← `nonlingeo`.
-   Воспроизведение: `tools/repro_s2s_delete.sh`.
+   Воспроизведение: `tools/repro_s2s_delete.sh` (≈ 1 мин; s2s — rc 134/139,
+   n2s — rc 0).
+
+   Диагностика (отладочная сборка `OPTLEVEL="-O0 -g"` вне дерева, gdb и
+   valgrind; в ccx-arch2 ничего не менялось):
+   - gdb: `free(ipkontot)` в `remastruct.c:106` ← `nonlingeo` — память
+     испорчена раньше, при заполнении `ipkontot`/`kontot`
+     (выделены в `remastruct.c` на `ne0 + nintpoint` и `nkon0 + 22·nintpoint`);
+   - valgrind, первая итерация после удаления:
+     `totalcontact.f:129` — `kon(ipkon(nelems)+ifacet(m,jfaces))` читает
+     невыделенную память: у удалённого ведомого элемента `ipkon < 0`
+     (удаление делает `ipkon[i] = -ipkon[i]-2`, `nonlingeo.c:1357` и др.);
+     `totalcontact.f:151` — `pmastsurf(3,igauss)` читает за концом массива
+     размером `6·nintpoint` (перевыделен в `nonlingeo.c:7802`): номера точек
+     из `islavsurf(2,·)` превышают `nintpoint`. Следствие — контактных
+     элементов больше, чем места в `ipkontot`, запись за границу.
+   - Гипотеза причины: при surface-to-surface (`mortar==1`) грани удалённых
+     элементов остаются в `islavsurf`, и `totalcontact` их не пропускает.
+   - Ещё до удалений valgrind показывает чтения за границу в стандартных
+     подпрограммах контакта (`slavintpoints.f:298`, `sutherland_hodgman.f:124`,
+     `interpolateinface.f:92–93`); к падению, по-видимому, не относятся.
 2. **Node-to-surface работает**: удалено 120 элементов, 10 из них имеют
    грань на поверхности контакта; FRACTURE COMPLETE.
 3. **С любым контактом (ncont ≠ 0) решатель отключает механизмы
