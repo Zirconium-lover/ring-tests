@@ -18,3 +18,7 @@ runs/**/m.de1stats
 runs/stage1/decks/
 runs/stage1/.claims/
 runs/**/post.log
+# каталоги прогонов этапа 1 добавляются явно (git add -f) после завершения
+# расчёта, чтобы незаконченные прогоны не попадали в коммиты
+runs/stage1/*/
+!runs/stage1/decks/
