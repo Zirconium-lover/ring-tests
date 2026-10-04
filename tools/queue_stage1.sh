@@ -17,7 +17,7 @@ if [ "$#" -gt 0 ]; then CASES=("$@"); else
     CASES=(H3_mu0.05 H8_mu0.05 H12_mu0.05 H3_mu0 H5_mu0 H8_mu0 H12_mu0
            H3_mu0.2 H5_mu0.2 H8_mu0.2 H12_mu0.2 H5_mu0.05_C3D8I)
 fi
-THREADS=$(( $(nproc) / NW )); [ "$THREADS" -lt 1 ] && THREADS=1
+THREADS=${THREADS:-$(( $(nproc) / NW ))}; [ "$THREADS" -lt 1 ] && THREADS=1
 LOCKDIR="$ROOT/runs/stage1/.claims"; mkdir -p "$LOCKDIR"
 
 worker() {

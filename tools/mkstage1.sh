@@ -14,4 +14,9 @@ for H in 3 5 8 12; do
         python3 "$HERE/mksector.py" -o "$OUT/H${H}_mu${mu}.inp" --H $H --mu $mu
     done
 done
-python3 "$HERE/mksector.py" -o "$OUT/H5_mu0.05_C3D8I.inp" --H 5 --mu 0.05 --elem C3D8I
+# контроль запирания C3D4: та же сетка на C3D8I (все высоты при μ = 0.05)
+for H in 3 5 8 12; do
+    python3 "$HERE/mksector.py" -o "$OUT/H${H}_mu0.05_C3D8I.inp" --H $H --mu 0.05 --elem C3D8I
+done
+# эталон: квадратичные C3D20R, контакт surface-to-surface (удалений нет)
+python3 "$HERE/mksector.py" -o "$OUT/H5_mu0.05_C3D20R_s2s.inp" --H 5 --mu 0.05 --elem C3D20R --ctype s2s
