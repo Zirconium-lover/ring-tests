@@ -13,6 +13,7 @@
   (три рисунка выше — по серии C3D8I; C3D4 с 6 тетраэдрами запирается);
   stage1_localization.png — наибольшая ε_θ по всей внутренней поверхности
                         от ε_ном: панели по μ, линии по H;
+  stage1_hconv.png    — наибольшая ε_θ (по поверхности и в середине высоты) от H;
   stage1_height.png   — max по дуге ε_θ в каждом ряду z внутренней поверхности
                         (post/surfmap.json, tools/surfmap_stage1.py) по высоте;
   stage1_elements.png — H = 5, μ = 0.05 на C3D4, C3D8I и C3D20R (запирание);
@@ -270,6 +271,40 @@ def fig_localization(runs, out, elem='C3D8I'):
     fig.savefig(out, dpi=140, bbox_inches='tight', facecolor='white')
 
 
+def fig_hconv(runs, out, elem='C3D8I'):
+    """Сходимость по высоте: ε_θ,max от H при нескольких ε_ном, панели по μ.
+
+    Сплошные — наибольшая по всей внутренней поверхности, пунктир — в середине высоты."""
+    have = [r for r in runs if r.get('surf') and r['elem'] == elem]
+    mus = sorted({r['mu'] for r in have})
+    if not mus:
+        return
+    levels = ((0.10, '#86b6ef'), (0.20, '#3987e5'), (0.25, '#256abf'), (0.30, '#104281'))
+    fig, axs = plt.subplots(1, len(mus), figsize=(5.4 * len(mus), 4.6), squeeze=False)
+    for ax, mu in zip(axs[0], mus):
+        sel = sorted((r for r in have if r['mu'] == mu), key=lambda r: r['H'])
+        for x, c in levels:
+            Hs, smax, smid = [], [], []
+            for r in sel:
+                f = min(r['surf']['frames'], key=lambda f: abs(f['eps_nom'] - x))
+                Hs.append(r['H'])
+                smax.append(max(f['emax']))
+                smid.append(f['emax'][0])
+            ax.plot(Hs, smax, color=c, lw=2, marker='o', ms=5, label='ε_ном = %.2f' % x)
+            ax.plot(Hs, smid, color=c, lw=1.2, ls='--', marker='o', ms=3)
+        ax.set_title('μ = %g' % mu, fontsize=11, color=INK, loc='left')
+        ax.set_xlabel('высота кольца H, мм', color=INK)
+        ax.set_xticks([r['H'] for r in sel])
+        style(ax)
+    axs[0][0].set_ylabel('max ε_θ, внутренняя поверхность', color=INK)
+    axs[0][0].legend(frameon=False, fontsize=9, loc='upper right')
+    fig.suptitle('Этап 1, %s: наибольшая окружная деформация от высоты кольца '
+                 '(— по всей поверхности, - - в середине высоты)' % elem, fontsize=12, color=INK,
+                 x=0.01, ha='left')
+    fig.tight_layout()
+    fig.savefig(out, dpi=140, bbox_inches='tight', facecolor='white')
+
+
 def table(runs, out):
     keys = [('epsmax_IN_Z0', 'ε_θ,max сер.'), ('epsmax_IN_ZTOP', 'ε_θ,max торец'),
             ('hs_z0_eta_avg', 'η'), ('hs_z0_szz_stt_avg', 'σzz/σθθ'), ('tmin_Z0', 't_min/t0'),
@@ -324,6 +359,7 @@ def main():
     fig_profiles(runs, os.path.join(a.figs, 'stage1_profiles.png'), elem='C3D8I')
     fig_hotspot(runs, os.path.join(a.figs, 'stage1_hotspot.png'), elem='C3D8I')
     fig_localization(runs, os.path.join(a.figs, 'stage1_localization.png'))
+    fig_hconv(runs, os.path.join(a.figs, 'stage1_hconv.png'))
     fig_height(runs, os.path.join(a.figs, 'stage1_height.png'))
     fig_elements(runs, os.path.join(a.figs, 'stage1_elements.png'))
     fig_elements(runs, os.path.join(a.figs, 'stage1_tetmesh.png'),
