@@ -25,3 +25,10 @@ python3 "$HERE/mksector.py" -o "$OUT/H5_mu0.05_C3D20R_s2s.inp" --H 5 --mu 0.05 -
 # сетка C3D4 для этапа 2 (удаление — только C3D4): разбиение на 24 тетраэдра,
 # сравнивается с эталоном C3D20R (измельчение Kuhn до 0.05 мм не понадобилось)
 python3 "$HERE/mksector.py" -o "$OUT/H5_mu0.05_x24.inp" --H 5 --mu 0.05 --tet x24
+# после максимума силы картина зависит от H и при 12 мм: проверка сходимости
+# по высоте на 16 и 20 мм (C3D8I, мю = 0 и 0.05)
+for H in 16 20; do
+    for mu in 0 0.05; do
+        python3 "$HERE/mksector.py" -o "$OUT/H${H}_mu${mu}_C3D8I.inp" --H $H --mu $mu --elem C3D8I
+    done
+done

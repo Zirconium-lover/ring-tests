@@ -29,7 +29,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-H_COL = {3.0: '#2a78d6', 5.0: '#eb6834', 8.0: '#1baf7a', 12.0: '#eda100'}
+H_COL = {3.0: '#2a78d6', 5.0: '#eb6834', 8.0: '#1baf7a', 12.0: '#eda100', 16.0: '#e87ba4',
+         20.0: '#008300'}
 INK, MUTED, GRID = '#1f1f1e', '#6b6a63', '#e4e3dc'
 TARGETS = (0.10, 0.20)
 
@@ -196,38 +197,43 @@ def fig_elements(runs, out, elems=('C3D4', 'C3D8I', 'C3D20R'), H=5.0, mu=0.05,
     fig.savefig(out, dpi=140, bbox_inches='tight', facecolor='white')
 
 
-def fig_height(runs, out, mu=0.05):
-    """ε_θ,max по дуге в каждом ряду z (внутр. поверхность, surfmap.json) по высоте."""
-    rows = [('C3D4', 'C3D4 (6 тетраэдров, шаг 0.1)'), ('C3D8I', 'C3D8I; чёрный — C3D20R, H = 5')]
+def fig_height(runs, out, elem='C3D8I'):
+    """ε_θ,max по дуге в каждом ряду z (внутр. поверхность, surfmap.json) по высоте.
+
+    Строки — μ, столбцы — ε_ном; ось x — расстояние от свободного торца,
+    кривая кончается в середине высоты (точка). Чёрный пунктир — C3D20R."""
     have = [r for r in runs if r.get('surf')]
-    if not have:
+    mus = sorted({r['mu'] for r in have if r['elem'] == elem})
+    if not mus:
         return
-    fig, axs = plt.subplots(len(rows), len(TARGETS), figsize=(6.2 * len(TARGETS), 4.3 * len(rows)),
+    xs = (0.10, 0.15, 0.20)
+    fig, axs = plt.subplots(len(mus), len(xs), figsize=(5.4 * len(xs), 3.9 * len(mus)),
                             squeeze=False)
-    for i, (elem, lab) in enumerate(rows):
+    for i, mu in enumerate(mus):
         sel = sorted((r for r in have if r['mu'] == mu and r['elem'] == elem), key=lambda r: r['H'])
-        ref = [r for r in have if r['mu'] == mu and r['elem'] == 'C3D20R'] if elem == 'C3D8I' else []
-        for j, x in enumerate(TARGETS):
+        ref = [r for r in have if r['mu'] == mu and r['elem'] == 'C3D20R']
+        for j, x in enumerate(xs):
             ax = axs[i][j]
             for r in sel + ref:
                 f = min(r['surf']['frames'], key=lambda f: abs(f['eps_nom'] - x))
                 d = [0.5 * r['H'] - z for z in f['z']]
-                c = INK if r['elem'] == 'C3D20R' else H_COL.get(r['H'], INK)
-                ax.plot(d, f['emax'], color=c, lw=2 if r['elem'] != 'C3D20R' else 1.4,
-                        ls='-' if r['elem'] != 'C3D20R' else '--',
-                        label='H = %g мм%s' % (r['H'], ', C3D20R' if r['elem'] == 'C3D20R' else ''))
+                isref = r['elem'] == 'C3D20R'
+                c = INK if isref else H_COL.get(r['H'], INK)
+                ax.plot(d, f['emax'], color=c, lw=1.4 if isref else 2, ls='--' if isref else '-',
+                        label='H = %g мм%s' % (r['H'], ', C3D20R' if isref else ''))
                 ax.plot(d[0], f['emax'][0], 'o', color=c, ms=5)
-            ax.set_title('%s, ε_ном ≈ %.2f' % (lab, x), fontsize=10.5, color=INK, loc='left')
-            ax.set_xlabel('расстояние от свободного торца, мм (точка — середина высоты)', color=INK)
-            ax.set_ylabel('max по дуге ε_θ, внутр. поверхность', color=INK)
-            style(ax)
+            ax.set_title('μ = %g, ε_ном ≈ %.2f' % (mu, x), fontsize=10.5, color=INK, loc='left')
+            if i == len(mus) - 1:
+                ax.set_xlabel('расстояние от свободного торца, мм (точка — середина высоты)',
+                              color=INK, fontsize=9)
             if j == 0:
-                ax.legend(frameon=False, fontsize=9)
-    fig.suptitle('Этап 1, μ = %g: наибольшая окружная деформация по высоте кольца' % mu,
-                 fontsize=12, color=INK, x=0.01, ha='left')
+                ax.set_ylabel('max по дуге ε_θ, внутр. пов.', color=INK)
+            style(ax)
+        axs[i][0].legend(frameon=False, fontsize=8)
+    fig.suptitle('Этап 1, %s: наибольшая окружная деформация внутренней поверхности по высоте'
+                 % elem, fontsize=12, color=INK, x=0.01, ha='left')
     fig.tight_layout()
     fig.savefig(out, dpi=140, bbox_inches='tight', facecolor='white')
-
 
 def table(runs, out):
     keys = [('epsmax_IN_Z0', 'ε_θ,max сер.'), ('epsmax_IN_ZTOP', 'ε_θ,max торец'),
