@@ -10,11 +10,13 @@
                         (сплошные) и у торца (пунктир) при ε_ном = 0.10 и 0.20, μ = 0.05;
   stage1_hotspot.png  — опасная точка (max PEEQ в середине высоты): η, σ_zz/σ_θθ
                         и концентрация ε_max/ε_ср от ε_ном, μ = 0.05;
-  stage1_{profiles,hotspot}_C3D8I.png — то же для серии высот на C3D8I;
+  (три рисунка выше — по серии C3D8I; C3D4 с 6 тетраэдрами запирается);
+  stage1_localization.png — наибольшая ε_θ по всей внутренней поверхности
+                        от ε_ном: панели по μ, линии по H;
   stage1_height.png   — max по дуге ε_θ в каждом ряду z внутренней поверхности
                         (post/surfmap.json, tools/surfmap_stage1.py) по высоте;
   stage1_elements.png — H = 5, μ = 0.05 на C3D4, C3D8I и C3D20R (запирание);
-  stage1_tetmesh.png  — то же для сеток C3D4 (6 и 24 тетраэдра, шаг 0.1 и 0.05);
+  stage1_tetmesh.png  — то же для сеток C3D4 (6 и 24 тетраэдра на шестигранник);
 Таблица runs/stage1/summary.md — значения при ε_ном = 0.10 и 0.20 и
 отклонения от следующей по величине высоты (критерий 3 %).
 """
@@ -72,12 +74,12 @@ def style(ax):
     ax.tick_params(colors=MUTED)
 
 
-def fig_force(runs, out):
-    mus = sorted({r['mu'] for r in runs if r['elem'] == 'C3D4'})
+def fig_force(runs, out, elem='C3D8I'):
+    mus = sorted({r['mu'] for r in runs if r['elem'] == elem})
     fig, axs = plt.subplots(1, len(mus), figsize=(5.2 * len(mus), 4.4), sharey=True)
     axs = axs if len(mus) > 1 else [axs]
     for ax, mu in zip(axs, mus):
-        for r in sorted((r for r in runs if r['mu'] == mu and r['elem'] == 'C3D4'),
+        for r in sorted((r for r in runs if r['mu'] == mu and r['elem'] == elem),
                         key=lambda r: r['H']):
             x = [p['eps_nom'] for p in r['ts']]
             y = [p['Fz'] / r['H'] / 1000.0 for p in r['ts']]
@@ -87,7 +89,7 @@ def fig_force(runs, out):
         style(ax)
     axs[0].set_ylabel('сила на конусе / высота кольца, кН/мм', color=INK)
     axs[-1].legend(frameon=False, fontsize=9, loc='lower right')
-    fig.suptitle('Этап 1: сила на конусе F_z/H (без трения конус–сегмент)', fontsize=12,
+    fig.suptitle('Этап 1, %s: сила на конусе F_z/H (без трения конус–сегмент)' % elem, fontsize=12,
                  color=INK, x=0.01, ha='left')
     fig.savefig(out, dpi=140, bbox_inches='tight', facecolor='white')
 
@@ -235,6 +237,39 @@ def fig_height(runs, out, elem='C3D8I'):
     fig.tight_layout()
     fig.savefig(out, dpi=140, bbox_inches='tight', facecolor='white')
 
+def fig_localization(runs, out, elem='C3D8I'):
+    """Наибольшая ε_θ по всей внутренней поверхности от ε_ном: панели по μ, линии по H.
+
+    Пунктир — номинальная деформация ln(1 + ε_ном); вертикаль — максимум силы."""
+    have = [r for r in runs if r.get('surf') and r['elem'] == elem]
+    mus = sorted({r['mu'] for r in have})
+    if not mus:
+        return
+    fig, axs = plt.subplots(1, len(mus), figsize=(5.4 * len(mus), 4.6), sharey=True, squeeze=False)
+    for ax, mu in zip(axs[0], mus):
+        sel = sorted((r for r in have if r['mu'] == mu), key=lambda r: r['H'])
+        for r in sel:
+            fr = r['surf']['frames']
+            ax.plot([f['eps_nom'] for f in fr], [max(f['emax']) for f in fr],
+                    color=H_COL.get(r['H'], INK), lw=2, label='H = %g мм' % r['H'])
+        xx = [0.0, 0.364]
+        ax.plot(xx, [math.log(1 + x) for x in xx], color=MUTED, lw=1, ls='--')
+        if sel:
+            xf = sel[-1]['summ']['eps_nom_at_Fmax']
+            ax.axvline(xf, color=MUTED, lw=0.8, ls=':')
+            ax.text(xf + 0.004, 0.97, 'максимум силы', fontsize=8, color=MUTED, va='top',
+                    transform=ax.get_xaxis_transform())
+        ax.set_title('μ = %g' % mu, fontsize=11, color=INK, loc='left')
+        ax.set_xlabel('номинальная деформация u_r/R_i', color=INK)
+        style(ax)
+        ax.legend(frameon=False, fontsize=9, loc='center left')
+    axs[0][0].set_ylabel('max ε_θ по внутренней поверхности', color=INK)
+    fig.suptitle('Этап 1, %s: локализация — наибольшая окружная деформация '
+                 '(пунктир — равномерная раздача)' % elem, fontsize=12, color=INK, x=0.01, ha='left')
+    fig.tight_layout()
+    fig.savefig(out, dpi=140, bbox_inches='tight', facecolor='white')
+
+
 def table(runs, out):
     keys = [('epsmax_IN_Z0', 'ε_θ,max сер.'), ('epsmax_IN_ZTOP', 'ε_θ,max торец'),
             ('hs_z0_eta_avg', 'η'), ('hs_z0_szz_stt_avg', 'σzz/σθθ'), ('tmin_Z0', 't_min/t0'),
@@ -286,15 +321,13 @@ def main():
     print('runs:', ', '.join(r['name'] for r in runs))
     os.makedirs(a.figs, exist_ok=True)
     fig_force(runs, os.path.join(a.figs, 'stage1_force.png'))
-    fig_profiles(runs, os.path.join(a.figs, 'stage1_profiles.png'))
-    fig_hotspot(runs, os.path.join(a.figs, 'stage1_hotspot.png'))
-    if sum(r['elem'] == 'C3D8I' for r in runs) > 1:
-        fig_profiles(runs, os.path.join(a.figs, 'stage1_profiles_C3D8I.png'), elem='C3D8I')
-        fig_hotspot(runs, os.path.join(a.figs, 'stage1_hotspot_C3D8I.png'), elem='C3D8I')
+    fig_profiles(runs, os.path.join(a.figs, 'stage1_profiles.png'), elem='C3D8I')
+    fig_hotspot(runs, os.path.join(a.figs, 'stage1_hotspot.png'), elem='C3D8I')
+    fig_localization(runs, os.path.join(a.figs, 'stage1_localization.png'))
     fig_height(runs, os.path.join(a.figs, 'stage1_height.png'))
     fig_elements(runs, os.path.join(a.figs, 'stage1_elements.png'))
     fig_elements(runs, os.path.join(a.figs, 'stage1_tetmesh.png'),
-                 elems=('C3D4', 'C3D4-x24', 'C3D4-h0.05', 'C3D20R'),
+                 elems=('C3D4', 'C3D4-x24', 'C3D20R'),
                  title='сетки C3D4 против эталона C3D20R')
     tpath = a.table or os.path.join(a.runs, 'summary.md')
     table(runs, tpath)
