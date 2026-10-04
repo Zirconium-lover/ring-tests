@@ -37,10 +37,11 @@ FIGS = {
     'Опасная точка': 'stage1_hotspot.png',
 }
 
+FOOTER = 'Кольца Э635 на сегментной оправке — этапы 0 и 1'
 CSS = """
 @page { size: A4; margin: 16mm 15mm 16mm 15mm;
   @bottom-right { content: counter(page) " / " counter(pages); font: 8pt 'Liberation Sans', sans-serif; color: #6b6a63; }
-  @bottom-left { content: "Кольца Э635 на сегментной оправке — этапы 0 и 1"; font: 8pt 'Liberation Sans', sans-serif; color: #6b6a63; } }
+  @bottom-left { content: "%FOOTER%"; font: 8pt 'Liberation Sans', sans-serif; color: #6b6a63; } }
 @page :first { @bottom-left { content: none; } }
 html { font-family: 'Liberation Sans', 'DejaVu Sans', sans-serif; font-size: 9.6pt; color: #1f1f1e; line-height: 1.42; }
 body { margin: 0; }
@@ -84,7 +85,7 @@ def fig_file(alt):
     sys.exit('нет рисунка для подписи: %r' % alt)
 
 
-def build_html(md_text, figs_dir):
+def build_html(md_text, figs_dir, footer=FOOTER, subline=None, newpage_keys=None, md_dir='.'):
     lines = md_text.splitlines()
     title = lines[0].lstrip('# ').strip()
     body = '\n'.join(lines[1:])
@@ -100,6 +101,9 @@ def build_html(md_text, figs_dir):
         alt = mm.group(1).replace('\\', '')
         return '![%s](%s)' % (alt, 'file://' + os.path.abspath(os.path.join(figs_dir, fig_file(alt))))
     body = re.sub(r'&#91;image: (.*?)\\\]', img, body)
+    # обычные картинки markdown с относительным путём — от каталога .md
+    body = re.sub(r'!\[([^\]]*)\]\((?!file://|https?://)([^)]+)\)',
+                  lambda mm: '![%s](file://%s)' % (mm.group(1), os.path.abspath(os.path.join(md_dir, mm.group(2)))), body)
     body = re.sub(r'^- \[ \] ', '- ', body, flags=re.M)
     h = markdown.markdown(body, extensions=['tables', 'sane_lists'])
     # рисунок + следующий курсивный абзац → <figure> с подписью
@@ -118,16 +122,18 @@ def build_html(md_text, figs_dir):
         n = len(toc) + 1
         toc.append((n, m.group(1)))
         # с новой страницы — крупные части: этап 0, этап 1, рекомендации, приложение
-        newpage = any(m.group(1).startswith(k) for k in ('Этап 0', 'Этап 1', 'Рекомендации', 'Приложение'))
+        keys = newpage_keys if newpage_keys is not None else ('Этап 0', 'Этап 1', 'Рекомендации', 'Приложение')
+        newpage = any(m.group(1).startswith(k) for k in keys)
         cls = ' class="newpage"' if newpage else ''
         return '<h2 id="s%d"%s>%d. %s</h2>' % (n, cls, n, m.group(1))
     h = re.sub(r'<h2>(.*?)</h2>', anchor, h)
     toc_html = '<div class="toc"><b>Содержание</b><ol>%s</ol></div>' % ''.join(
         '<li><a href="#s%d">%s</a></li>' % (n, t) for n, t in toc)
-    head = '<h1>%s</h1><div class="sub">%s · расчёты CalculiX (ccx-arch2 @ c75ad9b), репозиторий ring-tests</div>%s' % (
-        html.escape(title), sub, toc_html)
+    if subline is None:
+        subline = '%s · расчёты CalculiX (ccx-arch2 @ c75ad9b), репозиторий ring-tests' % sub
+    head = '<h1>%s</h1><div class="sub">%s</div>%s' % (html.escape(title), subline, toc_html)
     return ('<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>%s</title><style>%s</style>'
-            '</head><body>%s%s</body></html>' % (html.escape(title), CSS, head, h))
+            '</head><body>%s%s</body></html>' % (html.escape(title), CSS.replace('%FOOTER%', footer), head, h))
 
 
 def find_chrome():
@@ -146,8 +152,13 @@ def main():
     ap.add_argument('-o', required=True)
     ap.add_argument('--figs', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'notes', 'figs'))
     ap.add_argument('--html', default=None, help='куда сохранить промежуточный HTML')
+    ap.add_argument('--footer', default=FOOTER, help='текст нижнего колонтитула')
+    ap.add_argument('--sub', default=None, help='подзаголовок под названием')
+    ap.add_argument('--newpage', default=None, help='разделы с новой страницы: начала заголовков через «;»')
     a = ap.parse_args()
-    page = build_html(open(a.md, encoding='utf-8').read(), a.figs)
+    keys = tuple(k for k in a.newpage.split(';') if k) if a.newpage is not None else None
+    page = build_html(open(a.md, encoding='utf-8').read(), a.figs, a.footer, a.sub, keys,
+                      os.path.dirname(os.path.abspath(a.md)))
     hpath = a.html or os.path.splitext(a.o)[0] + '.html'
     open(hpath, 'w', encoding='utf-8').write(page)
     cmd = [find_chrome(), '--headless', '--no-sandbox', '--disable-gpu', '--allow-file-access-from-files',

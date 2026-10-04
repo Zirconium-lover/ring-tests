@@ -40,3 +40,5 @@ runs/hscreen/decks/
 runs/hscreen/.claims/
 runs/hscreen/*/
 runs/hscreen/queue.log
+# промежуточный HTML сборки PDF (абсолютные пути к рисункам)
+notes/*.html
