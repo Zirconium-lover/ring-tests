@@ -20,8 +20,12 @@ u_z = u_r / tan(θ/2). Наружная поверхность сегмента 
 (notes/stage0_solver_check.md).
 
 Сетка кольца — структурная по (r, φ, z); --elem C3D4 режет каждый
-шестигранник на 6 тетраэдров (как на этапе разрушения), --elem C3D8I
-оставляет шестигранники (контроль объёмного запирания C3D4).
+шестигранник на тетраэдры (как на этапе разрушения), --elem C3D8I
+оставляет шестигранники (контроль объёмного запирания C3D4). Разбиение
+--tet kuhn — 6 тетраэдров вокруг диагонали; --tet x24 — 24 тетраэдра через
+центры граней и центр шестигранника (каждая грань — 4 треугольника вокруг
+своего центра, каждый треугольник с центром шестигранника даёт тетраэдр):
+больше узлов на тетраэдр и нет выделенной диагонали, меньше запирание.
 
 Материал — Э635, изотропная пластичность (кривая B, notes/literature_e635.md):
 σ = K·(e0 + ε_p)^n, K = 653 МПа, n = 0.082, e0 подобран так, что
@@ -73,15 +77,19 @@ def build(a):
     nz = max(2, round(0.5 * a.H / a.size))
     a.nr, a.nphi, a.nz = nr, nphi, nz
     quad = a.elem == 'C3D20R'
-    f = 2 if quad else 1          # узлы на удвоенной сетке для квадратичных
+    x24 = a.elem == 'C3D4' and a.tet == 'x24'
+    f = 2 if quad or x24 else 1   # узлы на удвоенной сетке: середины рёбер / центры
     ring = {}
     for I in range(f * nr + 1):
         r = a.ri + t * I / (f * nr)
         for J in range(f * nphi + 1):
             ph = alpha * J / (f * nphi)
             for K in range(f * nz + 1):
-                if quad and (I % 2) + (J % 2) + (K % 2) > 1:
+                odd = (I % 2) + (J % 2) + (K % 2)
+                if quad and odd > 1:
                     continue      # центры граней и элементов у C3D20R не нужны
+                if x24 and odd == 1:
+                    continue      # середины рёбер у x24 не нужны
                 ring[I, J, K] = m.node(r * math.cos(ph), r * math.sin(ph),
                                        0.5 * a.H * K / (f * nz))
     # C3D20R: углы как у C3D8, затем середины рёбер 1-2, 2-3, 3-4, 4-1,
@@ -99,6 +107,20 @@ def build(a):
                     eid += 1
                     m.elems.append((eid, 'C3D20R', [ring[2 * i + di, 2 * j + dj, 2 * k + dk]
                                                     for di, dj, dk in Q20]))
+                elif x24:
+                    B = ring[2 * i + 1, 2 * j + 1, 2 * k + 1]
+                    for fc in HEX_FACES.values():
+                        cs = [HEX[q] for q in fc]
+                        F = ring[tuple(2 * (i, j, k)[d] + sum(c[d] for c in cs) // 2
+                                       for d in range(3))]
+                        cn = [ring[2 * i + 2 * c[0], 2 * j + 2 * c[1], 2 * k + 2 * c[2]]
+                              for c in cs]
+                        for q in range(4):
+                            conn = [B, F, cn[q], cn[(q + 1) % 4]]
+                            if tet_volume([m.nodes[n] for n in conn]) < 0:
+                                conn[2], conn[3] = conn[3], conn[2]
+                            eid += 1
+                            m.elems.append((eid, 'C3D4', conn))
                 else:
                     hx = [ring[i + di, j + dj, k + dk] for di, dj, dk in HEX]
                     if a.elem == 'C3D4':
@@ -297,6 +319,8 @@ def parser():
     ap.add_argument('--sector', type=float, default=22.5, help='180/число сегментов, град')
     ap.add_argument('--size', type=float, default=0.1, help='размер элемента кольца, мм')
     ap.add_argument('--elem', choices=('C3D4', 'C3D8I', 'C3D8', 'C3D20R'), default='C3D4')
+    ap.add_argument('--tet', choices=('kuhn', 'x24'), default='kuhn',
+                    help='разбиение шестигранника на C3D4')
     ap.add_argument('--kerf', type=float, default=0.2,
                     help='ширина пропила между сегментами по R_i, мм')
     ap.add_argument('--clear', type=float, default=0.0, help='радиальный зазор сегмент–кольцо, мм')

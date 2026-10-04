@@ -20,3 +20,7 @@ for H in 3 5 8 12; do
 done
 # эталон: квадратичные C3D20R, контакт surface-to-surface (удалений нет)
 python3 "$HERE/mksector.py" -o "$OUT/H5_mu0.05_C3D20R_s2s.inp" --H 5 --mu 0.05 --elem C3D20R --ctype s2s
+# сетки C3D4 для этапа 2 (удаление — только C3D4): разбиение на 24 тетраэдра
+# и измельчение вдвое, сравниваются с эталоном C3D20R
+python3 "$HERE/mksector.py" -o "$OUT/H5_mu0.05_x24.inp" --H 5 --mu 0.05 --tet x24
+python3 "$HERE/mksector.py" -o "$OUT/H5_mu0.05_h0.05.inp" --H 5 --mu 0.05 --size 0.05

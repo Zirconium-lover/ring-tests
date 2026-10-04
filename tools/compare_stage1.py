@@ -10,6 +10,9 @@
                         (сплошные) и у торца (пунктир) при ε_ном = 0.10 и 0.20, μ = 0.05;
   stage1_hotspot.png  — опасная точка (max PEEQ в середине высоты): η, σ_zz/σ_θθ
                         и концентрация ε_max/ε_ср от ε_ном, μ = 0.05;
+  stage1_{profiles,hotspot}_C3D8I.png — то же для серии высот на C3D8I;
+  stage1_elements.png — H = 5, μ = 0.05 на C3D4, C3D8I и C3D20R (запирание);
+  stage1_tetmesh.png  — то же для сеток C3D4 (6 и 24 тетраэдра, шаг 0.1 и 0.05);
 Таблица runs/stage1/summary.md — значения при ε_ном = 0.10 и 0.20 и
 отклонения от следующей по величине высоты (критерий 3 %).
 """
@@ -74,11 +77,6 @@ def fig_force(runs, out):
             x = [p['eps_nom'] for p in r['ts']]
             y = [p['Fz'] / r['H'] / 1000.0 for p in r['ts']]
             ax.plot(x, y, color=H_COL.get(r['H'], INK), lw=2, label='H = %g мм' % r['H'])
-        for r in runs:
-            if r['mu'] == mu and r['elem'] != 'C3D4':
-                ax.plot([p['eps_nom'] for p in r['ts']],
-                        [p['Fz'] / r['H'] / 1000.0 for p in r['ts']],
-                        color=INK, lw=1.2, ls='--', label='H = %g мм, %s' % (r['H'], r['elem']))
         ax.set_title('μ = %g' % mu, fontsize=11, color=INK, loc='left')
         ax.set_xlabel('номинальная деформация u_r/R_i', color=INK)
         style(ax)
@@ -89,8 +87,8 @@ def fig_force(runs, out):
     fig.savefig(out, dpi=140, bbox_inches='tight', facecolor='white')
 
 
-def fig_profiles(runs, out, mu=0.05):
-    sel = sorted((r for r in runs if r['mu'] == mu and r['elem'] == 'C3D4'), key=lambda r: r['H'])
+def fig_profiles(runs, out, mu=0.05, elem='C3D4'):
+    sel = sorted((r for r in runs if r['mu'] == mu and r['elem'] == elem), key=lambda r: r['H'])
     fig, axs = plt.subplots(1, len(TARGETS), figsize=(6.2 * len(TARGETS), 4.6), sharey=False)
     for ax, x in zip(axs, TARGETS):
         for r in sel:
@@ -110,13 +108,14 @@ def fig_profiles(runs, out, mu=0.05):
         ax.set_ylabel('окружная деформация ε_θ (лог.), внутр. поверхность', color=INK)
         style(ax)
     axs[0].legend(frameon=False, fontsize=8, ncol=2, loc='upper left')
-    fig.suptitle('Этап 1, μ = %g: окружная деформация по дуге — середина высоты и торец' % mu,
+    fig.suptitle('Этап 1, μ = %g, %s: окружная деформация по дуге — середина высоты и торец'
+                 % (mu, elem),
                  fontsize=12, color=INK, x=0.01, ha='left')
     fig.savefig(out, dpi=140, bbox_inches='tight', facecolor='white')
 
 
-def fig_hotspot(runs, out, mu=0.05):
-    sel = sorted((r for r in runs if r['mu'] == mu and r['elem'] == 'C3D4'), key=lambda r: r['H'])
+def fig_hotspot(runs, out, mu=0.05, elem='C3D4'):
+    sel = sorted((r for r in runs if r['mu'] == mu and r['elem'] == elem), key=lambda r: r['H'])
     fig, axs = plt.subplots(1, 3, figsize=(16, 4.4))
     for r in sel:
         c = H_COL.get(r['H'], INK)
@@ -126,15 +125,6 @@ def fig_hotspot(runs, out, mu=0.05):
         axs[1].plot(x, [p.get('hs_z0_szz_stt', float('nan')) for p in r['ts']], color=c, lw=2)
         axs[2].plot(x, [p['epsmax_IN_Z0'] / p['epsm_IN_Z0'] if p['epsm_IN_Z0'] > 1e-4
                         else float('nan') for p in r['ts']], color=c, lw=2)
-    for r in runs:
-        if r['mu'] == mu and r['elem'] != 'C3D4':
-            x = [p['eps_nom'] for p in r['ts']]
-            axs[0].plot(x, [p.get('hs_z0_eta', float('nan')) for p in r['ts']], color=INK,
-                        lw=1.2, ls='--', label='H = %g, %s' % (r['H'], r['elem']))
-            axs[1].plot(x, [p.get('hs_z0_szz_stt', float('nan')) for p in r['ts']], color=INK,
-                        lw=1.2, ls='--')
-            axs[2].plot(x, [p['epsmax_IN_Z0'] / p['epsm_IN_Z0'] if p['epsm_IN_Z0'] > 1e-4
-                            else float('nan') for p in r['ts']], color=INK, lw=1.2, ls='--')
     titles = ('трёхосность η = σ_m/σ_экв', 'σ_zz/σ_θθ', 'концентрация ε_θ,max/ε_θ,ср (внутр.)')
     for ax, t in zip(axs, titles):
         ax.set_title(t, fontsize=11, color=INK, loc='left')
@@ -145,8 +135,60 @@ def fig_hotspot(runs, out, mu=0.05):
     axs[0].text(0.005, 1 / 3 + 0.005, 'одноосн. 1/3', fontsize=8, color=MUTED)
     axs[0].text(0.005, 1 / math.sqrt(3) + 0.005, 'плоск. деф. 0.577', fontsize=8, color=MUTED)
     axs[0].legend(frameon=False, fontsize=9)
-    fig.suptitle('Этап 1, μ = %g: опасная точка (max PEEQ в середине высоты)' % mu, fontsize=12,
+    fig.suptitle('Этап 1, μ = %g, %s: опасная точка (max PEEQ в середине высоты)' % (mu, elem),
+                 fontsize=12,
                  color=INK, x=0.01, ha='left')
+    fig.savefig(out, dpi=140, bbox_inches='tight', facecolor='white')
+
+
+E_COL = {'C3D4': '#2a78d6', 'C3D8I': '#eb6834', 'C3D20R': INK,
+         'C3D4-x24': '#1baf7a', 'C3D4-h0.05': '#e87ba4'}
+
+
+def fig_elements(runs, out, elems=('C3D4', 'C3D8I', 'C3D20R'), H=5.0, mu=0.05,
+                 title='тип элемента (C3D20R — эталон)'):
+    """Один и тот же расчёт (H, μ) на разных сетках: запирание C3D4."""
+    sel = [r for e in elems for r in runs if r['H'] == H and r['mu'] == mu and r['elem'] == e]
+    if len(sel) < 2:
+        return
+    fig, axs = plt.subplots(2, 2, figsize=(12.5, 8.6))
+    ax = axs[0][0]
+    for r in sel:
+        p, xe = nearest_profile(r, 0.20)
+        if not p:
+            continue
+        c = E_COL[r['elem']]
+        ax.plot(p['IN_Z0']['phi'], p['IN_Z0']['eps'], color=c, lw=2, label='%s: середина' % r['elem'])
+        ax.plot(p['IN_ZTOP']['phi'], p['IN_ZTOP']['eps'], color=c, lw=1.4, ls='--',
+                label='%s: торец' % r['elem'])
+    ax.axvline(21.458, color=MUTED, lw=0.8, ls=':')
+    ax.set_title('ε_θ(φ) на внутренней поверхности, ε_ном ≈ 0.20', fontsize=11, color=INK,
+                 loc='left')
+    ax.set_xlabel('φ, град (0 — середина сегмента, 22.5 — середина зазора)', color=INK)
+    ax.legend(frameon=False, fontsize=8, ncol=1, loc='upper left')
+    panels = ((axs[0][1], 'epsmax_IN_Z0', 'epsmax_IN_ZTOP',
+               'ε_θ,max на внутр. поверхности: середина (—), торец (- -)'),
+              (axs[1][0], 'hs_z0_eta', None, 'трёхосность η в опасной точке (z = 0)'),
+              (axs[1][1], 'hs_z0_szz_stt', None, 'σ_zz/σ_θθ в опасной точке (z = 0)'))
+    for ax, k1, k2, t in panels:
+        for r in sel:
+            x = [p['eps_nom'] for p in r['ts']]
+            ax.plot(x, [p.get(k1, float('nan')) for p in r['ts']], color=E_COL[r['elem']], lw=2,
+                    label=r['elem'])
+            if k2:
+                ax.plot(x, [p.get(k2, float('nan')) for p in r['ts']], color=E_COL[r['elem']],
+                        lw=1.4, ls='--')
+        ax.set_title(t, fontsize=11, color=INK, loc='left')
+        ax.set_xlabel('номинальная деформация u_r/R_i', color=INK)
+    axs[1][0].axhline(1 / 3, color=MUTED, lw=0.8, ls=':')
+    axs[1][0].text(0.005, 1 / 3 + 0.005, 'одноосн. 1/3', fontsize=8, color=MUTED)
+    axs[1][0].legend(frameon=False, fontsize=9)
+    for row in axs:
+        for ax in row:
+            style(ax)
+    fig.suptitle('Этап 1, H = %g мм, μ = %g: %s' % (H, mu, title),
+                 fontsize=12, color=INK, x=0.01, ha='left')
+    fig.tight_layout()
     fig.savefig(out, dpi=140, bbox_inches='tight', facecolor='white')
 
 
@@ -157,10 +199,11 @@ def table(runs, out):
     L = ['# Этап 1: сводка серии', '',
          'ε_ном = u_r/R_i. Величины «сер.» — внутренняя поверхность в середине высоты,',
          '«торец» — у свободного торца; η, σzz/σθθ — опасная точка (max PEEQ, z = 0).',
-         'Δ — относительное отличие от следующей по величине высоты при том же μ.', '']
+         'Δ — относительное отличие от следующей по величине высоты при том же μ и типе элемента.',
+         '']
     L.append('| расчёт | ε_ном при F_max | F_z,max, Н | итог |')
     L.append('|---|---|---|---|')
-    for r in sorted(runs, key=lambda r: (r['elem'], r['mu'], r['H'])):
+    for r in sorted(runs, key=lambda r: (r['elem'] != 'C3D4', r['elem'], r['mu'], r['H'])):
         s = r['summ']
         L.append('| %s | %.3f | %.0f | rc=%s, %s с, до ε_ном = %.3f |' % (
             r['name'], s['eps_nom_at_Fmax'], s['Fz_max'], s.get('return_code'),
@@ -169,8 +212,9 @@ def table(runs, out):
         L += ['', '## ε_ном = %.2f' % x, '']
         L.append('| расчёт | ' + ' | '.join(k[1] for k in keys) + ' | Δ ε_max сер. | Δ η | Δ F_z/H |')
         L.append('|---' * (len(keys) + 4) + '|')
-        for mu in sorted({r['mu'] for r in runs}):
-            sel = sorted((r for r in runs if r['mu'] == mu and r['elem'] == 'C3D4'),
+        groups = sorted({(r['elem'] != 'C3D4', r['elem'], r['mu']) for r in runs})
+        for _, elem, mu in groups:
+            sel = sorted((r for r in runs if r['mu'] == mu and r['elem'] == elem),
                          key=lambda r: r['H'])
             for i, r in enumerate(sel):
                 vals = [interp(r['ts'], k[0], x) for k in keys]
@@ -185,12 +229,6 @@ def table(runs, out):
                 L.append('| %s | ' % r['name'] + ' | '.join(
                     ('%.0f' % v if k[0] == 'Fz' else '%.4f' % v) for v, k in zip(vals, keys))
                     + ' | ' + ' | '.join(dd) + ' |')
-        for r in runs:
-            if r['elem'] != 'C3D4':
-                vals = [interp(r['ts'], k[0], x) for k in keys]
-                L.append('| %s | ' % r['name'] + ' | '.join(
-                    ('%.0f' % v if k[0] == 'Fz' else '%.4f' % v) for v, k in zip(vals, keys))
-                    + ' | | | |')
     open(out, 'w').write('\n'.join(L) + '\n')
 
 
@@ -206,6 +244,13 @@ def main():
     fig_force(runs, os.path.join(a.figs, 'stage1_force.png'))
     fig_profiles(runs, os.path.join(a.figs, 'stage1_profiles.png'))
     fig_hotspot(runs, os.path.join(a.figs, 'stage1_hotspot.png'))
+    if sum(r['elem'] == 'C3D8I' for r in runs) > 1:
+        fig_profiles(runs, os.path.join(a.figs, 'stage1_profiles_C3D8I.png'), elem='C3D8I')
+        fig_hotspot(runs, os.path.join(a.figs, 'stage1_hotspot_C3D8I.png'), elem='C3D8I')
+    fig_elements(runs, os.path.join(a.figs, 'stage1_elements.png'))
+    fig_elements(runs, os.path.join(a.figs, 'stage1_tetmesh.png'),
+                 elems=('C3D4', 'C3D4-x24', 'C3D4-h0.05', 'C3D20R'),
+                 title='сетки C3D4 против эталона C3D20R')
     tpath = a.table or os.path.join(a.runs, 'summary.md')
     table(runs, tpath)
     print('written figures and', tpath)

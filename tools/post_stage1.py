@@ -38,6 +38,7 @@ def read_deck(path):
     nodes, elems, sets, esets = {}, {}, {}, {}
     cur = name = None
     ur = ri = None
+    tet, size = 'kuhn', 0.1
     for line in open(path):
         s = line.strip()
         if s.startswith('**'):
@@ -56,6 +57,12 @@ def read_deck(path):
             m = re.search(r'\belem=([A-Z0-9]+)', s)
             if m:
                 et = m.group(1)
+            m = re.search(r'\btet=(\w+)', s)
+            if m:
+                tet = m.group(1)
+            m = re.search(r'\bsize=([0-9.eE+-]+)', s)
+            if m:
+                size = float(m.group(1))
             continue
         if s.startswith('*'):
             kw = s.lower()
@@ -82,8 +89,11 @@ def read_deck(path):
             sets[name] += [int(x) for x in v]
         elif cur == 'elset':
             esets[name] += [int(x) for x in v]
+    # метка сетки: тип элемента, разбиение на тетраэдры (если не kuhn), шаг (если не 0.1)
+    label = et + ('-x24' if et == 'C3D4' and tet == 'x24' else '')
+    label += '-h%g' % size if abs(size - 0.1) > 1e-9 else ''
     return dict(nodes=nodes, elems=elems, sets=sets, esets=esets, ur=ur, ri=ri,
-                H=H, mu=mu, elem=et)
+                H=H, mu=mu, elem=label)
 
 
 HDR = re.compile(r'^\s*(total force|displacements|stresses|equivalent plastic strain)'
