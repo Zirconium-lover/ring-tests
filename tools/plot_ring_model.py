@@ -41,6 +41,8 @@ def main():
     ecc, phi0 = float(p['ecc']), float(p['phi0'])
     ring_f, seg_f = [], []
     for e, c in elems.items():
+        if len(c) < 8:
+            continue                              # пружины
         f = c[:4]                                 # грань 1-2-3-4: z = z_min элемента
         if all(abs(nodes[q][2]) < 1e-9 for q in f):
             (seg_f if c[0] in seg_ids else ring_f).append([nodes[q][:2] for q in f])
@@ -54,12 +56,12 @@ def main():
     for k in range(nseg):
         ph = math.radians(2 * d['sector'] * k)
         ax.text(4.3 * math.cos(ph), 4.3 * math.sin(ph), str(k), ha='center', va='center', fontsize=9, color='#1d3d63')
-    for name, lab, dx in (('PIN_X', 'u_x = 0', 0.25), ('PIN_Y', 'u_y = 0', 0.25)):
-        n = d['sets'][name][0]
-        x, y = nodes[n][:2]
-        ax.plot(x, y, 's', color=INK, ms=7)
-        ax.annotate(lab, (x, y), xytext=(x * 1.17, y * 1.17 + (0.3 if name == 'PIN_Y' else 0)), fontsize=9,
-                    ha='center', arrowprops=dict(arrowstyle='-', lw=0.6))
+    for name in ('SPR_X', 'SPR_Y'):
+        for n in d['sets'][name]:
+            x, y = nodes[n][:2]
+            ax.plot(x, y, 's', color=INK, ms=6)
+            ax.annotate('пружина', (x, y), xytext=(x * 1.2, y * 1.2 + (0.25 if name == 'SPR_Y' else 0)), fontsize=8.5,
+                        ha='center', arrowprops=dict(arrowstyle='-', lw=0.6))
     t0 = math.radians(phi0)
     ax.annotate('стенка тоньше всего\n(φ = %g°, −%g %%)' % (phi0, 100 * ecc), (6.3 * math.cos(t0), 6.3 * math.sin(t0)),
                 xytext=(7.0, 1.6), fontsize=9.5, color=MARK, arrowprops=dict(arrowstyle='->', color=MARK, lw=1))
@@ -103,7 +105,7 @@ def main():
         ('Контакт', 'node-to-surface, μ = %s' % p['mu']),
         ('Материал', 'Мизес, кривая B, без повреждения'),
         ('Несоверш.', 't = 0.8·(1 − %g·cos(φ − %g°))' % (ecc, phi0)),
-        ('Опоры', 'u_x = 0 при φ = 90°, u_y = 0 при 180°'),
+        ('Опоры', '4 пружины по касательной, %s Н/мм' % p.get('kspring', '1.0')),
         ('Нагружение', 'u_r до %s мм (ε_ном до %.2f)' % (p['ur'], float(p['ur']) / 5.5)),
     ]
     tab = ax4.table(cellText=[[k, v] for k, v in rows], colWidths=[0.3, 0.95], loc='upper left', cellLoc='left')

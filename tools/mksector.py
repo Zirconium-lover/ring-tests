@@ -17,8 +17,10 @@ z = 0 (u_z = 0). Торец z = H/2 свободен.
 окружности, N = 180/sector сегментов с серединами при φ_k = k·360°/N, у
 каждого все узлы ведутся вдоль своей биссектрисы (u_x = u_r·cos φ_k,
 u_y = u_r·sin φ_k). Жёсткое смещение и поворот кольца в плоскости держат
-два узла наружной поверхности в серединах сегментов при φ = 90° (u_x = 0)
-и 180° (u_y = 0). Несовершенство — эксцентриситет толщины
+четыре мягкие пружины на землю (SPRING1, --kspring Н/мм) в узлах наружной
+поверхности при φ = 0, 90, 180, 270° по касательной: жёсткие опоры мешали
+окружному перетеканию материала (ложная концентрация у опоры при 90°),
+а сила пружин — доли ньютона. Несовершенство — эксцентриситет толщины
 t(φ) = t·(1 − ecc·cos(φ − φ0)) (внутренний радиус точный); по высоте —
 половина (симметрия z = 0) или полная (--full-height).
 
@@ -199,10 +201,11 @@ def build(a):
         # в середине сегмента и середине высоты
         sets['HOLD'] = [ring[NR, 0 if a.full_ring else NP // 2, NZ // 2]]
     if a.full_ring:
-        # жёсткое смещение и поворот в плоскости: узлы наружной поверхности
-        # в середине высоты при φ = 90° (держим u_x) и 180° (держим u_y)
-        sets['PIN_X'] = [ring[NR, NP // 4, KM]]
-        sets['PIN_Y'] = [ring[NR, NP // 2, KM]]
+        # жёсткое смещение и поворот в плоскости: мягкие пружины по касательной
+        # в узлах наружной поверхности середины высоты: при 90° и 270° — по x,
+        # при 0° и 180° — по y
+        sets['SPR_X'] = [ring[NR, NP // 4, KM], ring[NR, 3 * NP // 4, KM]]
+        sets['SPR_Y'] = [ring[NR, 0, KM], ring[NR, NP // 2, KM]]
         del sets['PHI0'], sets['PHI1']
     # --- жёсткий сегмент ---
     phe = alpha - (0.5 * a.kerf) / a.ri
@@ -236,6 +239,12 @@ def build(a):
         if a.full_ring:
             sets['SEG%d' % kseg] = list(seg.values())
             m.seg_angles.append(phk)
+    m.springs = []
+    if a.full_ring:
+        for name in ('SPR_X', 'SPR_Y'):
+            for n in sets[name]:
+                eid += 1
+                m.springs.append((eid, n, name))
     return m, sets, seg_faces, nring_el
 
 
@@ -285,6 +294,11 @@ def write(a):
     L.append('*Element, Type=C3D8, Elset=SEGMENT')
     L += ['%d, %s' % (e, ', '.join(map(str, c))) for e, t, c in m.elems
           if t == 'C3D8' and e > nring]
+    for name in ('SPR_X', 'SPR_Y'):
+        ids = [(e, n) for e, n, nm in m.springs if nm == name]
+        if ids:
+            L.append('*Element, Type=SPRING1, Elset=E%s' % name)
+            L += ['%d, %d' % (e, n) for e, n in ids]
     for name, ids in sets.items():
         L.append('*Nset, Nset=%s' % name)
         L += lines(ids)
@@ -307,6 +321,10 @@ def write(a):
     L.append('*Elastic')
     L.append('210000., 0.3')
     L.append('*Solid Section, Elset=SEGMENT, Material=SEGMENT_STEEL')
+    if m.springs:
+        # жёсткость обязательно с десятичной точкой: строку без точки решатель
+        # читает как номер степени свободы (springs.f)
+        L += ['*Spring, Elset=ESPR_X', '1', '%.6e' % a.kspring, '*Spring, Elset=ESPR_Y', '2', '%.6e' % a.kspring]
     L.append('*Surface, Name=RING_IN_NODES, Type=Node')
     L.append('RING_INNER')
     if a.ctype == 's2s':
@@ -345,8 +363,6 @@ def write(a):
         L.append('PHI0, 2, 2, 0.')
     L.append(('HOLD' if a.full_height else 'ZBOT') + ', 3, 3, 0.')
     if a.full_ring:
-        L.append('PIN_X, 1, 1, 0.')
-        L.append('PIN_Y, 2, 2, 0.')
         # каждый сегмент — вдоль своей биссектрисы; обе компоненты растут
         # пропорционально (линейная амплитуда шага)
         for kseg, phk in enumerate(m.seg_angles):
@@ -405,6 +421,8 @@ def parser():
     ap.add_argument('--ecc', type=float, default=0.0,
                     help='эксцентриситет толщины: t(φ) = t·(1 − ecc·cos(φ − φ0))')
     ap.add_argument('--phi0', type=float, default=0.0, help='где стенка тоньше всего, град')
+    ap.add_argument('--kspring', type=float, default=1.0,
+                    help='жёсткость пружин против смещения кольца как целого (--full-ring), Н/мм')
     ap.add_argument('--size', type=float, default=0.1, help='размер элемента кольца, мм')
     ap.add_argument('--elem', choices=('C3D4', 'C3D8I', 'C3D8', 'C3D20R'), default='C3D4')
     ap.add_argument('--tet', choices=('kuhn', 'x24'), default='kuhn',
