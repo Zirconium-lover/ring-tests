@@ -72,50 +72,67 @@ def build(a):
     nphi = max(4, round(alpha * a.ri / a.size))
     nz = max(2, round(0.5 * a.H / a.size))
     a.nr, a.nphi, a.nz = nr, nphi, nz
+    quad = a.elem == 'C3D20R'
+    f = 2 if quad else 1          # узлы на удвоенной сетке для квадратичных
     ring = {}
-    for i in range(nr + 1):
-        r = a.ri + t * i / nr
-        for j in range(nphi + 1):
-            ph = alpha * j / nphi
-            for k in range(nz + 1):
-                ring[i, j, k] = m.node(r * math.cos(ph), r * math.sin(ph),
-                                       0.5 * a.H * k / nz)
+    for I in range(f * nr + 1):
+        r = a.ri + t * I / (f * nr)
+        for J in range(f * nphi + 1):
+            ph = alpha * J / (f * nphi)
+            for K in range(f * nz + 1):
+                if quad and (I % 2) + (J % 2) + (K % 2) > 1:
+                    continue      # центры граней и элементов у C3D20R не нужны
+                ring[I, J, K] = m.node(r * math.cos(ph), r * math.sin(ph),
+                                       0.5 * a.H * K / (f * nz))
+    # C3D20R: углы как у C3D8, затем середины рёбер 1-2, 2-3, 3-4, 4-1,
+    # 5-6, 6-7, 7-8, 8-5, 1-5, 2-6, 3-7, 4-8 (в удвоенных индексах)
+    Q20 = [(0, 0, 0), (2, 0, 0), (2, 2, 0), (0, 2, 0), (0, 0, 2), (2, 0, 2), (2, 2, 2), (0, 2, 2),
+           (1, 0, 0), (2, 1, 0), (1, 2, 0), (0, 1, 0), (1, 0, 2), (2, 1, 2), (1, 2, 2), (0, 1, 2),
+           (0, 0, 1), (2, 0, 1), (2, 2, 1), (0, 2, 1)]
     eid = 0
     sec_z0, sec_ztop = [], []
     for i in range(nr):
         for j in range(nphi):
             for k in range(nz):
-                hx = [ring[i + di, j + dj, k + dk] for di, dj, dk in HEX]
                 first = eid + 1
-                if a.elem == 'C3D4':
-                    for tt in KUHN:
-                        conn = [hx[q] for q in tt]
-                        if tet_volume([m.nodes[n] for n in conn]) < 0:
-                            conn[1], conn[2] = conn[2], conn[1]
-                        eid += 1
-                        m.elems.append((eid, 'C3D4', conn))
-                else:
+                if quad:
                     eid += 1
-                    m.elems.append((eid, a.elem, hx))
+                    m.elems.append((eid, 'C3D20R', [ring[2 * i + di, 2 * j + dj, 2 * k + dk]
+                                                    for di, dj, dk in Q20]))
+                else:
+                    hx = [ring[i + di, j + dj, k + dk] for di, dj, dk in HEX]
+                    if a.elem == 'C3D4':
+                        for tt in KUHN:
+                            conn = [hx[q] for q in tt]
+                            if tet_volume([m.nodes[n] for n in conn]) < 0:
+                                conn[1], conn[2] = conn[2], conn[1]
+                            eid += 1
+                            m.elems.append((eid, 'C3D4', conn))
+                    else:
+                        eid += 1
+                        m.elems.append((eid, a.elem, hx))
                 if k == 0:
                     sec_z0 += list(range(first, eid + 1))
                 if k == nz - 1:
                     sec_ztop += list(range(first, eid + 1))
     nring_el = eid
     m.elsets = {'SEC_Z0': sec_z0, 'SEC_ZTOP': sec_ztop}
+    NR, NP, NZ = f * nr, f * nphi, f * nz
+    g = lambda I, J, K: ring.get((I, J, K))
+    pick = lambda cond: [n for (I, J, K), n in ring.items() if cond(I, J, K)]
     sets = {
-        'RING_INNER': [ring[0, j, k] for j in range(nphi + 1) for k in range(nz + 1)],
-        'RING_OUTER': [ring[nr, j, k] for j in range(nphi + 1) for k in range(nz + 1)],
-        'PHI0': [ring[i, 0, k] for i in range(nr + 1) for k in range(nz + 1)],
-        'PHI1': [ring[i, nphi, k] for i in range(nr + 1) for k in range(nz + 1)],
-        'ZBOT': [ring[i, j, 0] for i in range(nr + 1) for j in range(nphi + 1)],
-        'ZTOP': [ring[i, j, nz] for i in range(nr + 1) for j in range(nphi + 1)],
+        'RING_INNER': pick(lambda I, J, K: I == 0),
+        'RING_OUTER': pick(lambda I, J, K: I == NR),
+        'PHI0': pick(lambda I, J, K: J == 0),
+        'PHI1': pick(lambda I, J, K: J == NP),
+        'ZBOT': pick(lambda I, J, K: K == 0),
+        'ZTOP': pick(lambda I, J, K: K == NZ),
         # линии для постобработки: внутренняя и наружная поверхность
         # в середине высоты и на торце, по всей дуге
-        'IN_Z0': [ring[0, j, 0] for j in range(nphi + 1)],
-        'OUT_Z0': [ring[nr, j, 0] for j in range(nphi + 1)],
-        'IN_ZTOP': [ring[0, j, nz] for j in range(nphi + 1)],
-        'OUT_ZTOP': [ring[nr, j, nz] for j in range(nphi + 1)],
+        'IN_Z0': pick(lambda I, J, K: I == 0 and K == 0),
+        'OUT_Z0': pick(lambda I, J, K: I == NR and K == 0),
+        'IN_ZTOP': pick(lambda I, J, K: I == 0 and K == NZ),
+        'OUT_ZTOP': pick(lambda I, J, K: I == NR and K == NZ),
     }
     # --- жёсткий сегмент ---
     phe = alpha - (0.5 * a.kerf) / a.ri
@@ -143,6 +160,25 @@ def build(a):
     return m, sets, seg_faces, nring_el
 
 
+TET_FACES = {1: (0, 1, 2), 2: (0, 3, 1), 3: (1, 3, 2), 4: (2, 3, 0)}
+HEX_FACES = {1: (0, 1, 2, 3), 2: (4, 7, 6, 5), 3: (0, 4, 5, 1), 4: (1, 5, 6, 2),
+             5: (2, 6, 7, 3), 6: (3, 7, 4, 0)}
+
+
+def inner_faces(m, sets, a):
+    """Грани элементов кольца, все угловые узлы которых на R_i."""
+    inner = set(sets['RING_INNER'])
+    out = []
+    for e, t, c in m.elems:
+        if t != a.elem:
+            continue
+        faces = TET_FACES if t == 'C3D4' else HEX_FACES
+        for fid, fn in faces.items():
+            if all(c[q] in inner for q in fn):
+                out.append((e, fid))
+    return out
+
+
 def lines(ids, per=12):
     ids = sorted(set(ids))
     return [', '.join(str(x) for x in ids[i:i + per]) for i in range(0, len(ids), per)]
@@ -158,7 +194,15 @@ def write(a):
     L.append('*Node')
     L += ['%d, %.9f, %.9f, %.9f' % (n, *xyz) for n, xyz in m.nodes.items()]
     L.append('*Element, Type=%s, Elset=RING' % a.elem)
-    L += ['%d, %s' % (e, ', '.join(map(str, c))) for e, t, c in m.elems if t == a.elem]
+    for e, t, c in m.elems:
+        if t != a.elem:
+            continue
+        # не больше 16 значений в строке: у C3D20R хвост на строке продолжения
+        if len(c) > 15:
+            L.append('%d, %s,' % (e, ', '.join(map(str, c[:15]))))
+            L.append(', '.join(map(str, c[15:])))
+        else:
+            L.append('%d, %s' % (e, ', '.join(map(str, c))))
     L.append('*Element, Type=C3D8, Elset=SEGMENT')
     L += ['%d, %s' % (e, ', '.join(map(str, c))) for e, t, c in m.elems
           if t == 'C3D8' and e > nring]
@@ -184,6 +228,9 @@ def write(a):
     L.append('*Solid Section, Elset=SEGMENT, Material=SEGMENT_STEEL')
     L.append('*Surface, Name=RING_IN_NODES, Type=Node')
     L.append('RING_INNER')
+    if a.ctype == 's2s':
+        L.append('*Surface, Name=RING_IN_FACES, Type=Element')
+        L += ['%d, S%d' % (e, f) for e, f in inner_faces(m, sets, a)]
     L.append('*Surface, Name=SEG_OUT, Type=Element')
     L += ['%d, S%d' % (e, f) for e, f in seg_faces]
     L.append('*Surface Interaction, Name=SEG_RING')
@@ -192,8 +239,13 @@ def write(a):
     if a.mu > 0:
         L.append('*Friction')
         L.append('%g, %g' % (a.mu, a.kstick))
-    L.append('*Contact Pair, Interaction=SEG_RING, Type=Node to Surface')
-    L.append('RING_IN_NODES, SEG_OUT')
+    if a.ctype == 's2s':
+        # только без удаления элементов (этап 0: s2s + удаление падает)
+        L.append('*Contact Pair, Interaction=SEG_RING, Type=Surface to Surface')
+        L.append('RING_IN_FACES, SEG_OUT')
+    else:
+        L.append('*Contact Pair, Interaction=SEG_RING, Type=Node to Surface')
+        L.append('RING_IN_NODES, SEG_OUT')
     L.append('*Equation')
     s, c = math.sin(alpha), math.cos(alpha)
     for n in sorted(set(sets['PHI1'])):
@@ -244,7 +296,7 @@ def parser():
     ap.add_argument('--ro', type=float, default=6.3)
     ap.add_argument('--sector', type=float, default=22.5, help='180/число сегментов, град')
     ap.add_argument('--size', type=float, default=0.1, help='размер элемента кольца, мм')
-    ap.add_argument('--elem', choices=('C3D4', 'C3D8I', 'C3D8'), default='C3D4')
+    ap.add_argument('--elem', choices=('C3D4', 'C3D8I', 'C3D8', 'C3D20R'), default='C3D4')
     ap.add_argument('--kerf', type=float, default=0.2,
                     help='ширина пропила между сегментами по R_i, мм')
     ap.add_argument('--clear', type=float, default=0.0, help='радиальный зазор сегмент–кольцо, мм')
@@ -263,6 +315,8 @@ def parser():
     ap.add_argument('--epsf-eta', dest='epsf_eta', type=float, nargs='+',
                     default=[0.0, 0.9, 0.33, 0.8, 0.6, 0.55, 1.0, 0.35, 1.5, 0.25])
     ap.add_argument('--mu', type=float, default=0.05)
+    ap.add_argument('--ctype', choices=('n2s', 's2s'), default='n2s',
+                    help='контакт node-to-surface (по умолчанию) или surface-to-surface')
     ap.add_argument('--kpen', type=float, default=1.0e6, help='штраф контакта, МПа/мм')
     ap.add_argument('--kstick', type=float, default=1.0e5, help='жёсткость прилипания, МПа/мм')
     ap.add_argument('--ur', type=float, default=2.0, help='радиальное перемещение сегмента, мм')

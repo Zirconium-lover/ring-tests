@@ -166,15 +166,20 @@ def stress_cyl(s, phi):
 
 
 def hot_spot(deck, frame, eset, cents):
-    S = {int(r[0]): r[2:8] for r in frame.get(('S', eset), [])}
-    PE = {int(r[0]): r[2] for r in frame.get(('PE', eset), [])}
+    """Опасная точка — точка интегрирования с максимальной PEEQ в слое.
+
+    У C3D4 одна точка на элемент, у C3D8I — восемь; ключ (элемент, точка),
+    угол φ берётся по центру элемента."""
+    S = {(int(r[0]), int(r[1])): r[2:8] for r in frame.get(('S', eset), [])}
+    PE = {(int(r[0]), int(r[1])): r[2] for r in frame.get(('PE', eset), [])}
     if not PE:
         return None
-    e = max(PE, key=lambda k: PE[k])
+    key = max(PE, key=lambda k: PE[k])
+    e = key[0]
     x, y, z = cents[e]
     phi = math.atan2(y, x)
-    srr, stt, szz, vm, sm = stress_cyl(S[e], phi)
-    return dict(elem=e, phi=math.degrees(phi), r=math.hypot(x, y), peeq=PE[e],
+    srr, stt, szz, vm, sm = stress_cyl(S[key], phi)
+    return dict(elem=e, ip=key[1], phi=math.degrees(phi), r=math.hypot(x, y), peeq=PE[key],
                 eta=sm / vm if vm > 0 else 0.0, szz_stt=szz / stt if stt else 0.0,
                 srr_stt=srr / stt if stt else 0.0, vm=vm, stt=stt)
 
