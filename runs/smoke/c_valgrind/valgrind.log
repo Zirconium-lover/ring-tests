@@ -151,3 +151,27 @@
 ==18981==    by 0x35B4F5: nonlingeo (nonlingeo.c:7776)
 ==18981==    by 0x12C222: main (ccx_2.23.c:1300)
 ==18981== 
+==18981== 
+==18981== Process terminating with default action of signal 15 (SIGTERM)
+==18981==    at 0x898D97: triloc_ (triloc.f:34)
+==18981==    by 0x89780A: delaun_ (delaun.f:62)
+==18981==    by 0x8442B5: deltri_ (deltri.f:52)
+==18981==    by 0x74E17D: interpolateinface_ (interpolateinface.f:102)
+==18981==    by 0x65A92D: interpolatestatemainmt (interpolatestatemain.c:150)
+==18981==    by 0x8D30AA3: start_thread (pthread_create.c:447)
+==18981==    by 0x8DBDA63: clone (clone.S:100)
+==18981== 
+==18981== HEAP SUMMARY:
+==18981==     in use at exit: 22,119,726 bytes in 368 blocks
+==18981==   total heap usage: 6,473,232 allocs, 6,472,864 frees, 6,125,289,615 bytes allocated
+==18981== 
+==18981== LEAK SUMMARY:
+==18981==    definitely lost: 0 bytes in 0 blocks
+==18981==    indirectly lost: 0 bytes in 0 blocks
+==18981==      possibly lost: 6,402,871 bytes in 138 blocks
+==18981==    still reachable: 15,716,855 bytes in 230 blocks
+==18981==         suppressed: 0 bytes in 0 blocks
+==18981== Rerun with --leak-check=full to see details of leaked memory
+==18981== 
+==18981== For lists of detected and suppressed errors, rerun with: -s
+==18981== ERROR SUMMARY: 70272 errors from 12 contexts (suppressed: 0 from 0)
