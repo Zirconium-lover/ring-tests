@@ -81,10 +81,12 @@ def build(a):
                 ring[i, j, k] = m.node(r * math.cos(ph), r * math.sin(ph),
                                        0.5 * a.H * k / nz)
     eid = 0
+    sec_z0, sec_ztop = [], []
     for i in range(nr):
         for j in range(nphi):
             for k in range(nz):
                 hx = [ring[i + di, j + dj, k + dk] for di, dj, dk in HEX]
+                first = eid + 1
                 if a.elem == 'C3D4':
                     for tt in KUHN:
                         conn = [hx[q] for q in tt]
@@ -95,7 +97,12 @@ def build(a):
                 else:
                     eid += 1
                     m.elems.append((eid, a.elem, hx))
+                if k == 0:
+                    sec_z0 += list(range(first, eid + 1))
+                if k == nz - 1:
+                    sec_ztop += list(range(first, eid + 1))
     nring_el = eid
+    m.elsets = {'SEC_Z0': sec_z0, 'SEC_ZTOP': sec_ztop}
     sets = {
         'RING_INNER': [ring[0, j, k] for j in range(nphi + 1) for k in range(nz + 1)],
         'RING_OUTER': [ring[nr, j, k] for j in range(nphi + 1) for k in range(nz + 1)],
@@ -158,6 +165,9 @@ def write(a):
     for name, ids in sets.items():
         L.append('*Nset, Nset=%s' % name)
         L += lines(ids)
+    for name, ids in m.elsets.items():
+        L.append('*Elset, Elset=%s' % name)
+        L += lines(ids)
     L.append('*Material, Name=E635')
     L.append('*Elastic')
     L.append('%g, %g' % (a.E, a.nu))
@@ -197,15 +207,23 @@ def write(a):
     L.append('ZBOT, 3, 3, 0.')
     L.append('SEGNODES, 1, 1, %g' % a.ur)
     L.append('SEGNODES, 2, 3, 0.')
-    L.append('*Node Print, Nset=SEGNODES, Totals=Only, Frequency=1')
+    L.append('*Node Print, Nset=SEGNODES, Totals=Only, Frequency=%d' % a.printfreq)
     L.append('RF')
     for name in ('IN_Z0', 'OUT_Z0', 'IN_ZTOP', 'OUT_ZTOP'):
         L.append('*Node Print, Nset=%s, Frequency=%d' % (name, a.printfreq))
         L.append('U')
-    L.append('*Node File, Frequency=%d' % a.outfreq)
-    L.append('U, RF')
-    L.append('*El File, Frequency=%d' % a.outfreq)
-    L.append('S, E, PEEQ' + (', SDV' if a.damage else ''))
+    # слои элементов в середине высоты и у торца (вся толщина и дуга):
+    # напряжения и PEEQ для трёхосности и σ_zz в опасной точке
+    for name in ('SEC_Z0', 'SEC_ZTOP'):
+        L.append('*El Print, Elset=%s, Frequency=%d' % (name, a.printfreq))
+        L.append('S, PEEQ')
+    # В CalculiX FREQUENCY у *NODE PRINT и *NODE FILE пишется в одну
+    # переменную (jout(1)): частота общая для .dat и .frd, побеждает
+    # последняя. Поэтому одна частота, а .frd облегчён до U и PEEQ.
+    L.append('*Node File, Frequency=%d' % a.printfreq)
+    L.append('U')
+    L.append('*El File, Frequency=%d' % a.printfreq)
+    L.append('PEEQ' + (', SDV' if a.damage else ''))
     L.append('*End Step')
     os.makedirs(os.path.dirname(os.path.abspath(a.o)), exist_ok=True)
     with open(a.o, 'w') as f:
@@ -252,7 +270,6 @@ def parser():
     ap.add_argument('--dtmin', type=float, default=1e-6)
     ap.add_argument('--dtmax', type=float, default=0.005)
     ap.add_argument('--maxinc', type=int, default=20000)
-    ap.add_argument('--outfreq', type=int, default=20)
     ap.add_argument('--printfreq', type=int, default=5)
     return ap
 
