@@ -30,3 +30,13 @@ runs/nseg/decks/
 runs/nseg/.claims/
 runs/nseg/*/
 runs/nseg/queue.log
+# модели всего кольца: как этап 1
+runs/ring/decks/
+runs/ring/.claims/
+runs/ring/*/
+runs/ring/queue.log
+# проверка высоты (полный сегмент × полная высота, C3D8I): как этап 1
+runs/hscreen/decks/
+runs/hscreen/.claims/
+runs/hscreen/*/
+runs/hscreen/queue.log

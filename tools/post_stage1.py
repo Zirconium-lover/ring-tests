@@ -41,7 +41,7 @@ def read_deck(path):
     cur = name = None
     ur = ri = None
     tet, size, sector = 'kuhn', 0.1, 22.5
-    full_seg = full_height = False
+    full_seg = full_height = full_ring = False
     for line in open(path):
         s = line.strip()
         if s.startswith('**'):
@@ -71,6 +71,7 @@ def read_deck(path):
                 sector = float(m.group(1))
             full_seg = full_seg or 'full_seg=True' in s
             full_height = full_height or 'full_height=True' in s
+            full_ring = full_ring or 'full_ring=True' in s
             continue
         if s.startswith('*'):
             kw = s.lower()
@@ -103,9 +104,12 @@ def read_deck(path):
     # сколько таких областей в кольце: 2N полусегментов или N сегментов
     # (sector = 180/N), × 2 половины высоты (или 1 при полной высоте) — для силы на конусе
     nsect = round((180.0 if full_seg else 360.0) / sector) * (1 if full_height else 2)
+    if full_ring:
+        # всё кольцо: Fx — сумма радиальных сил всех сегментов модели
+        nsect = 1 if full_height else 2
     return dict(nodes=nodes, elems=elems, sets=sets, esets=esets, ur=ur, ri=ri,
                 H=H, mu=mu, elem=label, nsect=nsect, full_height=full_height, sector=sector,
-                nseg=round(180.0 / sector))
+                nseg=round(180.0 / sector), full_ring=full_ring)
 
 
 HDR = re.compile(r'^\s*(total force|displacements|stresses|equivalent plastic strain)'
@@ -238,9 +242,19 @@ def main():
     rows, prof = [], {}
     for t in times:
         fr = dat[t]
-        if ('F', 'SEGNODES') not in fr:
+        if deck['full_ring']:
+            # радиальная сила сегмента k — проекция его суммарной реакции на биссектрису
+            segs = [k for k in fr if k[0] == 'F' and re.fullmatch(r'SEG\d+', k[1])]
+            if not segs:
+                continue
+            fx = 0.0
+            for k in segs:
+                ph = math.radians(2 * deck['sector'] * int(k[1][3:]))
+                fx += fr[k][0][0] * math.cos(ph) + fr[k][0][1] * math.sin(ph)
+        elif ('F', 'SEGNODES') not in fr:
             continue
-        fx = fr[('F', 'SEGNODES')][0][0]
+        else:
+            fx = fr[('F', 'SEGNODES')][0][0]
         u = {k: {int(r[0]): r[1:4] for r in fr.get(('U', k), [])} for k in o}
         if not all(u[k] for k in o):
             continue
