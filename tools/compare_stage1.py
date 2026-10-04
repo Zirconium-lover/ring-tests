@@ -124,12 +124,12 @@ def fig_hotspot(runs, out, mu=0.05, elem='C3D4'):
     for r in sel:
         c = H_COL.get(r['H'], INK)
         x = [p['eps_nom'] for p in r['ts']]
-        axs[0].plot(x, [p.get('hs_z0_eta', float('nan')) for p in r['ts']], color=c, lw=2,
+        axs[0].plot(x, [p.get('hs_z0_eta_avg', float('nan')) for p in r['ts']], color=c, lw=2,
                     label='H = %g мм' % r['H'])
-        axs[1].plot(x, [p.get('hs_z0_szz_stt', float('nan')) for p in r['ts']], color=c, lw=2)
+        axs[1].plot(x, [p.get('hs_z0_szz_stt_avg', float('nan')) for p in r['ts']], color=c, lw=2)
         axs[2].plot(x, [p['epsmax_IN_Z0'] / p['epsm_IN_Z0'] if p['epsm_IN_Z0'] > 1e-4
                         else float('nan') for p in r['ts']], color=c, lw=2)
-    titles = ('трёхосность η = σ_m/σ_экв', 'σ_zz/σ_θθ', 'концентрация ε_θ,max/ε_θ,ср (внутр.)')
+    titles = ('η = σ_m/σ_экв (среднее в r ≤ 0.15 мм)', 'σ_zz/σ_θθ (то же)', 'концентрация ε_θ,max/ε_θ,ср (внутр.)')
     for ax, t in zip(axs, titles):
         ax.set_title(t, fontsize=11, color=INK, loc='left')
         ax.set_xlabel('номинальная деформация u_r/R_i', color=INK)
@@ -172,8 +172,8 @@ def fig_elements(runs, out, elems=('C3D4', 'C3D8I', 'C3D20R'), H=5.0, mu=0.05,
     ax.legend(frameon=False, fontsize=8, ncol=1, loc='upper left')
     panels = ((axs[0][1], 'epsmax_IN_Z0', 'epsmax_IN_ZTOP',
                'ε_θ,max на внутр. поверхности: середина (—), торец (- -)'),
-              (axs[1][0], 'hs_z0_eta', None, 'трёхосность η в опасной точке (z = 0)'),
-              (axs[1][1], 'hs_z0_szz_stt', None, 'σ_zz/σ_θθ в опасной точке (z = 0)'))
+              (axs[1][0], 'hs_z0_eta_avg', None, 'η в опасной точке (z = 0), среднее в r ≤ 0.15 мм'),
+              (axs[1][1], 'hs_z0_szz_stt_avg', None, 'σ_zz/σ_θθ там же, среднее в r ≤ 0.15 мм'))
     for ax, k1, k2, t in panels:
         for r in sel:
             x = [p['eps_nom'] for p in r['ts']]
@@ -231,11 +231,12 @@ def fig_height(runs, out, mu=0.05):
 
 def table(runs, out):
     keys = [('epsmax_IN_Z0', 'ε_θ,max сер.'), ('epsmax_IN_ZTOP', 'ε_θ,max торец'),
-            ('hs_z0_eta', 'η'), ('hs_z0_szz_stt', 'σzz/σθθ'), ('tmin_Z0', 't_min/t0'),
+            ('hs_z0_eta_avg', 'η'), ('hs_z0_szz_stt_avg', 'σzz/σθθ'), ('tmin_Z0', 't_min/t0'),
             ('Fz', 'F_z, Н')]
     L = ['# Этап 1: сводка серии', '',
          'ε_ном = u_r/R_i. Величины «сер.» — внутренняя поверхность в середине высоты,',
-         '«торец» — у свободного торца; η, σzz/σθθ — опасная точка (max PEEQ, z = 0).',
+         '«торец» — у свободного торца; η, σzz/σθθ — опасная точка (max PEEQ, z = 0),',
+         'средние по элементам в радиусе 0.15 мм.',
          'Δ — относительное отличие от следующей по величине высоты при том же μ и типе элемента.',
          '']
     L.append('| расчёт | ε_ном при F_max | F_z,max, Н | итог |')
@@ -259,7 +260,7 @@ def table(runs, out):
                 if i + 1 < len(sel):
                     n = sel[i + 1]
                     a = interp(r['ts'], 'epsmax_IN_Z0', x); b = interp(n['ts'], 'epsmax_IN_Z0', x)
-                    c = interp(r['ts'], 'hs_z0_eta', x); d = interp(n['ts'], 'hs_z0_eta', x)
+                    c = interp(r['ts'], 'hs_z0_eta_avg', x); d = interp(n['ts'], 'hs_z0_eta_avg', x)
                     e = interp(r['ts'], 'Fz', x) / r['H']; f = interp(n['ts'], 'Fz', x) / n['H']
                     dd = ['%+.1f %%' % (100 * (a / b - 1)), '%+.1f %%' % (100 * (c / d - 1)),
                           '%+.1f %%' % (100 * (e / f - 1))]

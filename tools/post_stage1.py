@@ -13,7 +13,8 @@
                    на конусе), средняя и экстремальные окружные деформации
                    внутренней поверхности в середине и у торца, утонение,
                    опасная точка (max PEEQ в слое z = 0): φ, r, PEEQ, η,
-                   σ_zz/σ_θθ, σ_rr/σ_θθ; то же у торца;
+                   σ_zz/σ_θθ, σ_rr/σ_θθ и средние η, σ_zz/σ_θθ, PEEQ по
+                   элементам в радиусе 0.15 мм (суффикс _avg); то же у торца;
   profiles.json  — ε_θ(φ) и t/t0(φ) в каждый момент (для сравнения серий);
   summary.json   — итог: u_r и ε при максимуме силы, F_max, время счёта и т. п.
 
@@ -31,6 +32,7 @@ import re
 import sys
 
 TANH = math.tan(math.radians(10.0))     # полуугол конуса 20°
+AVG_R = 0.15                            # мм, радиус усреднения в опасной точке
 NSECT = 32                              # 16 секторов по дуге × 2 половины по высоте
 
 
@@ -189,9 +191,25 @@ def hot_spot(deck, frame, eset, cents):
     x, y, z = cents[e]
     phi = math.atan2(y, x)
     srr, stt, szz, vm, sm = stress_cyl(S[key], phi)
-    return dict(elem=e, ip=key[1], phi=math.degrees(phi), r=math.hypot(x, y), peeq=PE[key],
-                eta=sm / vm if vm > 0 else 0.0, szz_stt=szz / stt if stt else 0.0,
-                srr_stt=srr / stt if stt else 0.0, vm=vm, stt=stt)
+    out = dict(elem=e, ip=key[1], phi=math.degrees(phi), r=math.hypot(x, y), peeq=PE[key],
+               eta=sm / vm if vm > 0 else 0.0, szz_stt=szz / stt if stt else 0.0,
+               srr_stt=srr / stt if stt else 0.0, vm=vm, stt=stt)
+    # то же, усреднённое по точкам элементов с центром в радиусе AVG_R от центра
+    # опасного элемента: η одной точки тетраэдра шумит, сравнивать сетки
+    # разного типа можно только по средним (η = Σσ_m / Σσ_экв)
+    c0 = cents[e]
+    sm_s = vm_s = zz_s = tt_s = pe_s = 0.0
+    n = 0
+    for k, s in S.items():
+        c = cents[k[0]]
+        if math.dist(c, c0) > AVG_R:
+            continue
+        a, b, zz, v, m_ = stress_cyl(s, math.atan2(c[1], c[0]))
+        sm_s += m_; vm_s += v; zz_s += zz; tt_s += b; pe_s += PE.get(k, 0.0)
+        n += 1
+    out.update(eta_avg=sm_s / vm_s if vm_s > 0 else 0.0, szz_stt_avg=zz_s / tt_s if tt_s else 0.0,
+               peeq_avg=pe_s / n if n else 0.0)
+    return out
 
 
 def main():
@@ -233,7 +251,8 @@ def main():
         for eset, tag in (('SEC_Z0', 'z0'), ('SEC_ZTOP', 'ztop')):
             hs = hot_spot(deck, fr, eset, cents)
             if hs:
-                for kk in ('phi', 'r', 'peeq', 'eta', 'szz_stt', 'srr_stt'):
+                for kk in ('phi', 'r', 'peeq', 'eta', 'szz_stt', 'srr_stt', 'eta_avg',
+                           'szz_stt_avg', 'peeq_avg'):
                     row['hs_%s_%s' % (tag, kk)] = hs[kk]
         rows.append(row)
         prof['%.6f' % t] = pr
