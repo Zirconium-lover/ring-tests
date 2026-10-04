@@ -12,8 +12,11 @@
      (в Фурье — умножение на −k·kᵀ). Её собственные векторы дают направление
      линии в каждой точке на этом масштабе. Малое σ — отдельные пластинки,
      большое σ — цепочки и сетка, которые из них сложены.
-     Доля радиальных Fn(σ) — доля длины осевых линий, отклонённых от окружного
-     направления больше чем на 45°. Длина — по скелету, как в RHF.
+     RHF(σ) — как у Simon et al.: длина осевых линий с весом 0 (до 40° от
+     окружного направления), 0.5 (40–65°), 1 (больше 65°). Линия засчитывается,
+     только если она сильнее, чем 99 % «линий» суррогата — того же снимка с
+     перемешанными фазами спектра (шум с тем же спектром, но без связных линий).
+     В json есть и Fn — доля длины с отклонением больше 45°.
   5. Профили по толщине: доля площади гидридов и Fn(σ) по слоям.
   6. Связность: какой зазор матрицы приходится «перепрыгивать», чтобы пройти
      по гидридам через стенку (и вдоль дуги — для сравнения), и доля матрицы
@@ -235,8 +238,10 @@ def unwrap(g, xs, yo, yi, um, margin_um=3.0, ro_px=None):
 
 
 # ---------------------------------------------------------------- сигнал гидридов
-def hydride_signal(S, um, line_um=2.5):
-    """Чёрный цилиндр: насколько точка темнее своего светлого окружения."""
+def hydride_signal(S, um, line_um=2.5, denoise_um=0.7):
+    """Чёрный цилиндр: насколько точка темнее своего светлого окружения.
+    Перед этим — лёгкое сглаживание, чтобы зерно шума СЭМ не выглядело линиями."""
+    S = ndi.gaussian_filter(S, max(0.5, denoise_um / um))
     r = max(2, int(round(1.5 * line_um / um)))
     bg = ndi.grey_closing(S, footprint=disk(r))
     bg = ndi.gaussian_filter(bg, r)
@@ -290,13 +295,34 @@ def drop_small(mask, min_len_px):
     return keep[lab]
 
 
-def ridge_mask(strength, rel=0.25):
-    """Линии там, где линия сильная (относительно сильнейших 1 %)."""
-    return strength > rel * np.percentile(strength, 99.0)
+def ridge_mask(strength, rel=0.25, k_noise=6.0):
+    """Линии там, где линия сильная: выше четверти сильнейших (1 %) и заметно выше шума.
+    Шум оцениваем по медиане и разбросу (гидриды занимают малую долю кадра)."""
+    med = np.median(strength)
+    mad = 1.4826 * np.median(np.abs(strength - med))
+    return strength > max(rel * np.percentile(strength, 99.0), med + k_noise * mad)
 
 
-def ridge_skeleton(strength, min_len_px=4, rel=0.25):
-    return skeletonize(drop_small(ridge_mask(strength, rel), min_len_px))
+def ridge_skeleton(strength, min_len_px=4, rel=0.25, thr=None):
+    m = ridge_mask(strength, rel) if thr is None else strength > thr
+    return skeletonize(drop_small(m, min_len_px))
+
+
+def phase_surrogates(h, n=2, seed=0):
+    """Тот же снимок с перемешанными фазами спектра: сила каждой волны та же,
+    а связных линий нет. Это «шум с тем же спектром» — по нему ставится порог."""
+    rng = np.random.default_rng(seed)
+    F = np.abs(np.fft.fft2(h - h.mean()))
+    out = []
+    for _ in range(n):
+        ph = np.angle(np.fft.fft2(rng.normal(size=h.shape)))
+        out.append(np.real(np.fft.ifft2(F * np.exp(1j * ph))) + h.mean())
+    return out
+
+
+def null_threshold(surr, sigma_px, pct=99.0):
+    """Линия засчитывается, если она сильнее, чем 99 % «линий» суррогата на этом масштабе."""
+    return float(np.percentile(np.concatenate([ridges(x, sigma_px)[0].ravel() for x in surr]), pct))
 
 
 def fn_from(angles, weights=None):
@@ -307,6 +333,27 @@ def fn_from(angles, weights=None):
     fn = w[dev > 45].sum() / w.sum()
     simon = np.where(dev <= 40, 0, np.where(dev < 65, 0.5, 1.0))
     return float(fn), float((simon * w).sum() / w.sum())
+
+
+def simon_weight(dev):
+    return np.where(dev <= 40, 0.0, np.where(dev < 65, 0.5, 1.0))
+
+
+def rhf_objects(mask, um, min_len_um=5.0):
+    """Классический RHF: каждый связный гидрид — отрезок по главной оси (длина, угол)."""
+    lab = sk_label(mask, connectivity=2)
+    L, dev = [], []
+    for r in regionprops(lab):
+        if r.axis_major_length * um < min_len_um:
+            continue
+        # orientation: угол главной оси к оси строк; переводим в отклонение от горизонтали (дуги)
+        a = abs(np.degrees(r.orientation))          # 0 — главная ось вдоль строк (вертикально)
+        dev.append(90.0 - a)
+        L.append(r.axis_major_length * um)
+    L, dev = np.asarray(L), np.asarray(dev)
+    if L.sum() == 0:
+        return np.nan, 0
+    return float((L * simon_weight(dev)).sum() / L.sum()), int(L.size)
 
 
 def spectral_fn(h, um, pmin_um, pmax_um, alpha=0.25):
@@ -356,33 +403,42 @@ def best_path(mask):
 
 # ---------------------------------------------------------------- всё вместе
 def analyse(path, um=None, bar_um=None, outer="top", scales_um=(1.5, 3, 6, 12, 24), n_layers=10,
-            line_um=2.5, crop=None, ro_mm=None, surfaces="mask", guess=None):
-    g = read_gray(path)
+            line_um=2.5, crop=None, ro_mm=None, surfaces="mask", guess=None, field=False, g=None,
+            null_pct=99.0):
+    if g is None:
+        g = read_gray(path)
     if crop:
         x0, x1, y0, y1 = crop
         g = g[y0:y1, x0:x1]
     if um is None:
         um = find_scale_bar(g, bar_um)
-    if guess is not None:
-        xs, yo, yi = surfaces_near(g, um, guess[0], guess[1], outer_top=(outer == "top"))
-        mask = None
-    elif surfaces == "outline":
-        xs, yo, yi = surfaces_from_outline(g, um, outer_top=(outer == "top"))
-        mask = None
+    if field:                       # поле внутри стенки/листа: кадр целиком, строки — радиус (ND)
+        S = g.copy(); inside = np.ones_like(g, bool); mask = None
+        xs = np.arange(g.shape[1], dtype=float); yo = np.zeros_like(xs); yi = np.full_like(xs, g.shape[0] - 1.0)
+        geo = dict(kind="field", thickness_um=float(g.shape[0] * um))
     else:
-        mask = wall_mask(g, um)
-        xs, yo, yi = surface_points(mask, outer_top=(outer == "top"))
-    S, inside, X, Y, geo = unwrap(g, xs, yo, yi, um, ro_px=None if ro_mm is None else ro_mm * 1000 / um)
+        if guess is not None:
+            xs, yo, yi = surfaces_near(g, um, guess[0], guess[1], outer_top=(outer == "top"))
+            mask = None
+        elif surfaces == "outline":
+            xs, yo, yi = surfaces_from_outline(g, um, outer_top=(outer == "top"))
+            mask = None
+        else:
+            mask = wall_mask(g, um)
+            xs, yo, yi = surface_points(mask, outer_top=(outer == "top"))
+        S, inside, X, Y, geo = unwrap(g, xs, yo, yi, um, ro_px=None if ro_mm is None else ro_mm * 1000 / um)
     h = hydride_signal(S, um, line_um)
     h[~inside] = 0
     nr, nc = h.shape
     depth = (np.arange(nr) + 0.5) * um + 3.0                 # от наружной поверхности
     # маска гидридов: тёмные линии (Оцу по сигналу) без точек травления и обрывков короче 6 мкм;
     # на неё опираются доля площади и связность
+    surr = phase_surrogates(np.where(inside, h, np.median(h[inside])))
     thr = threshold_otsu(h[inside])
-    st0, _ = ridges(h, max(1.0, 1.0 / um))
-    lines = drop_small(ridge_mask(st0) | ((h > thr) & ndi.binary_dilation(ridge_mask(st0), iterations=1)),
-                       6.0 / um)
+    s0 = max(1.0, 1.0 / um)
+    st0, _ = ridges(h, s0)
+    r0 = st0 > null_threshold(surr, s0, null_pct)
+    lines = drop_small(r0 | ((h > thr) & ndi.binary_dilation(r0, iterations=1)), 6.0 / um)
     hm = lines & (h > 0.5 * thr) & inside
     res = dict(file=os.path.basename(path), um_per_px=um, geometry=geo,
                strip_um=[nr * um, nc * um], area_fraction=float(hm.mean()))
@@ -397,13 +453,15 @@ def analyse(path, um=None, bar_um=None, outer="top", scales_um=(1.5, 3, 6, 12, 2
         st, ang = ridges(h, s_px)
         core = ndi.binary_erosion(inside, iterations=int(np.ceil(2.5 * s_px)), border_value=0)
         core[:, :int(np.ceil(2.5 * s_px))] = False; core[:, -int(np.ceil(2.5 * s_px)):] = False
-        sk = ridge_skeleton(st, min_len_px=max(4, 2 * s_px)) & core
+        sk = ridge_skeleton(st, min_len_px=max(4, 2 * s_px), thr=null_threshold(surr, s_px, null_pct)) & core
         sk_maps[s_um] = (sk, ang)
         fn, rhf = fn_from(ang[sk])
         prof = [fn_from(ang[rows][:, :][sk[rows]])[0] for rows in layers]
+        prof_rhf = [fn_from(ang[rows][:, :][sk[rows]])[1] for rows in layers]
         scale_rows.append(dict(scale_um=s_um, Fn=fn, RHF_simon=rhf, length_mm_per_mm2=float(sk.sum() * um / (inside.sum() * um * um) * 1e3),
-                               Fn_layers=prof))
+                               Fn_layers=prof, RHF_layers=prof_rhf))
     res["scales"] = scale_rows
+    res["RHF_objects"], res["n_objects"] = rhf_objects(hm, um)
     res["depth_layers_um"] = [float(depth[rows].mean()) for rows in layers]
     res["area_fraction_layers"] = [float(hm[rows].mean()) for rows in layers]
     # спектральная проверка по трём слоям (как у МИФИ: 1 — у наружной поверхности)
@@ -485,8 +543,8 @@ def figure(res, D, out_png, title=""):
         ax = fig.add_subplot(gs[1, k])
         sk, ang = D["sk"][s]
         ax.imshow(overlay(S, sk, ang, inside), extent=ext)
-        fn = [r for r in res["scales"] if r["scale_um"] == s][0]["Fn"]
-        ax.set_title(f"{'вг'[k]}) Масштаб {s:g} мкм: радиальных {fn:.2f}\n"
+        fn = [r for r in res["scales"] if r["scale_um"] == s][0]["RHF_simon"]
+        ax.set_title(f"{'вг'[k]}) Масштаб {s:g} мкм: RHF = {fn:.2f}\n"
                      f"оранжевый — радиальные, синий — окружные", loc="left", fontsize=10, color=INK)
         ax.set_xlabel("вдоль дуги, мкм")
         if k == 0: ax.set_ylabel("от наружной поверхности, мкм")
@@ -501,20 +559,19 @@ def figure(res, D, out_png, title=""):
     cols = [BLUE, AQUA, YELLOW, ORANGE, INK]
     styles = ["-", (0, (5, 2)), (0, (1.5, 1.5)), (0, (6, 2, 1, 2)), "-"]
     for r, c, ls in zip(res["scales"], cols, styles):
-        ax.plot(np.array(r["Fn_layers"]) * 100, dl, color=c, lw=2, ls=ls, label=f"{r['scale_um']:g} мкм")
-    ax.set_ylim(nr * um + 6, 0); ax.set_xlim(0, 100)
-    ax.axvline(50, color=GRID, lw=1, zorder=0)
-    ax.set_xlabel("доля радиальных, %"); ax.set_ylabel("от наружной поверхности, мкм")
-    ax.set_title("е) Доля радиальных по толщине", loc="left", fontsize=10, color=INK)
+        ax.plot(np.array(r["RHF_layers"]), dl, color=c, lw=2, ls=ls, label=f"{r['scale_um']:g} мкм")
+    ax.set_ylim(nr * um + 6, 0); ax.set_xlim(0, 1)
+    ax.set_xlabel("RHF"); ax.set_ylabel("от наружной поверхности, мкм")
+    ax.set_title("е) RHF по толщине", loc="left", fontsize=10, color=INK)
     ax.legend(frameon=False, fontsize=8.5, title="масштаб", title_fontsize=8.5, loc="lower right")
     for s_ in ("top", "right"): ax.spines[s_].set_visible(False)
     ax = fig.add_subplot(gs[2, 0])
     ss = [r["scale_um"] for r in res["scales"]]
-    ax.plot(ss, [r["Fn"] * 100 for r in res["scales"]], "o-", color=BLUE, lw=2, ms=6)
+    ax.plot(ss, [r["RHF_simon"] for r in res["scales"]], "o-", color=BLUE, lw=2, ms=6)
     ax.set_xscale("log"); ax.set_xticks(ss, [f"{s:g}" for s in ss]); ax.minorticks_off()
-    ax.set_ylim(0, 100); ax.axhline(50, color=GRID, lw=1, zorder=0)
-    ax.set_xlabel("масштаб σ, мкм"); ax.set_ylabel("доля радиальных, %")
-    ax.set_title("ж) Доля радиальных по масштабу (вся стенка)", loc="left", fontsize=10, color=INK)
+    ax.set_ylim(0, 1)
+    ax.set_xlabel("масштаб σ, мкм"); ax.set_ylabel("RHF")
+    ax.set_title("ж) RHF по масштабу (вся стенка)", loc="left", fontsize=10, color=INK)
     for s_ in ("top", "right"): ax.spines[s_].set_visible(False)
     ax = fig.add_subplot(gs[2, 1])
     base = np.where(D["hm"], 0.62, 0.98)
@@ -554,6 +611,10 @@ def main():
     ap.add_argument("--layers", type=int, default=10)
     ap.add_argument("--crop", help="x0,x1,y0,y1 — вырезать область до анализа (убрать подписи)")
     ap.add_argument("--ro-mm", type=float, help="известный наружный радиус, мм (иначе — по снимку)")
+    ap.add_argument("--field", action="store_true",
+                    help="поле без поверхностей: кадр целиком, радиус (ND) — по вертикали")
+    ap.add_argument("--line-um", type=float, default=2.5,
+                    help="наибольшая толщина гидрида, мкм (окно «чёрного цилиндра»)")
     ap.add_argument("--surface-guess", help="y_нар,y_вн — примерные строки поверхностей (пиксели); уточняются сами")
     ap.add_argument("--surfaces", choices=["mask", "outline"], default="mask",
                     help="mask — металл светлее/текстурнее заливки (оптика); outline — по тёмному контуру (СЭМ)")
@@ -566,7 +627,8 @@ def main():
     res, D = analyse(a.image, um=a.um_per_px, bar_um=a.bar_um, outer=a.outer,
                      scales_um=tuple(float(s) for s in a.scales.split(",")), n_layers=a.layers, crop=crop,
                      ro_mm=a.ro_mm, surfaces=a.surfaces,
-                     guess=tuple(float(v) for v in a.surface_guess.split(",")) if a.surface_guess else None)
+                     guess=tuple(float(v) for v in a.surface_guess.split(",")) if a.surface_guess else None,
+                     field=a.field, line_um=a.line_um)
     os.makedirs(a.out, exist_ok=True)
     stem = os.path.splitext(os.path.basename(a.image))[0]
     with open(os.path.join(a.out, stem + "_metrics.json"), "w") as f:
@@ -576,6 +638,7 @@ def main():
                                           "best_path_matrix_fraction_radial_only")}, ensure_ascii=False))
     for r in res["scales"]:
         print(f"  σ={r['scale_um']:>5g} мкм: Fn={r['Fn']:.2f}  RHF(Simon)={r['RHF_simon']:.2f}")
+    print(f"  RHF по объектам: {res['RHF_objects']:.2f} ({res['n_objects']} гидридов)")
 
 
 if __name__ == "__main__":
