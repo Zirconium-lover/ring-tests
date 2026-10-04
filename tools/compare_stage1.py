@@ -89,7 +89,8 @@ def fig_force(runs, out, elem='C3D8I'):
         ax.set_xlabel('номинальная деформация u_r/R_i', color=INK)
         style(ax)
     axs[0].set_ylabel('сила на конусе / высота кольца, кН/мм', color=INK)
-    axs[-1].legend(frameon=False, fontsize=9, loc='lower right')
+    full = max(axs, key=lambda ax: len(ax.get_lines()))   # легенда там, где все высоты
+    full.legend(frameon=False, fontsize=9, loc='lower left')
     fig.suptitle('Этап 1, %s: сила на конусе F_z/H (без трения конус–сегмент)' % elem, fontsize=12,
                  color=INK, x=0.01, ha='left')
     fig.savefig(out, dpi=140, bbox_inches='tight', facecolor='white')
