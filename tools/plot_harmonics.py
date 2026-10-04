@@ -70,8 +70,9 @@ def component(x, ns):
 def ring_frames():
     cache = os.path.join(RING, 'post', 'harm_profiles.json')
     frd = os.path.join(RING, 'm.frd')
+    tconv = last_converged(RING) + 1e-9
     if os.path.exists(cache) and os.path.getmtime(cache) > os.path.getmtime(frd):
-        return json.load(open(cache))
+        return [f for f in json.load(open(cache)) if f['t'] <= tconv]
     d = read_deck(os.path.join(RING, 'm.inp'))
     nodes = d['nodes']
     inn, out = sorted(set(d['sets']['IN_Z0'])), sorted(set(d['sets']['OUT_Z0']))
@@ -92,7 +93,17 @@ def ring_frames():
         res.append(row)
     os.makedirs(os.path.dirname(cache), exist_ok=True)
     json.dump(res, open(cache, 'w'))
-    return res
+    return [f for f in res if f['t'] <= tconv]
+
+
+def last_converged(run):
+    """Время последнего сошедшегося инкремента по m.sta (строки без «U» в столбце попыток)."""
+    tmax = 0.0
+    for line in open(os.path.join(run, 'm.sta')):
+        f = line.split()
+        if len(f) >= 6 and f[0].isdigit() and 'U' not in f[2]:
+            tmax = max(tmax, float(f[4]))
+    return tmax
 
 
 def at(frames, x):
@@ -301,48 +312,61 @@ def fig_modulation(fr, out):
 
 def fig_growth(fr, out):
     en = [f['en'] for f in fr]
-    A = {k: [] for k in ('a0', 'a1', 'a12s', 'sb', 'hi', 'phimax', 'smax', 'emax')}
+    A = {k: [] for k in ('a0', 'a1', 'a3', 'a6', 'a12', 'a12s', 'sb', 'smax', 'segmax')}
     for f in fr:
         e = np.array(f['in'])
         c = np.fft.rfft(e) / len(e)
         a = 2 * np.abs(c)
-        A['a0'].append(c[0].real); A['a1'].append(a[1])
-        A['a12s'].append(2 * c[12].real)              # знак: + больше под серединами сегментов, − у кромок
+        A['a0'].append(c[0].real); A['a1'].append(a[1]); A['a3'].append(a[3]); A['a6'].append(a[6])
+        A['a12'].append(a[12]); A['a12s'].append(2 * c[12].real)   # + больше под серединами, − у кромок
         A['sb'].append(math.hypot(a[11], a[13]))
-        A['hi'].append(math.sqrt(sum(a[k] ** 2 for k in range(24, len(a), 12))))
         jm = int(np.argmax(e)); ph = f['phi'][jm]
-        A['phimax'].append(ph); A['smax'].append(((ph + 15) % 30) - 15); A['emax'].append(e[jm])
+        A['smax'].append(abs(((ph + 15) % 30) - 15)); A['segmax'].append(int(round(ph / 30)) % 12)
     fig, axs = plt.subplots(1, 3, figsize=(18, 6), gridspec_kw=dict(wspace=0.25, width_ratios=[1.1, 1.1, 1]))
     ax = axs[0]
-    ax.plot(en, A['a1'], color=C1, lw=2.2, marker='o', ms=3, label='n = 1 (разностенность)')
-    ax.plot(en, A['a12s'], color=C12, lw=2.2, marker='o', ms=3, label='n = 12 со знаком (сегменты)')
-    ax.plot(en, A['sb'], color=CSB, lw=2.2, marker='o', ms=3, label='n = 11 и 13 (боковые полосы)')
-    ax.plot(en, A['hi'], color=CREST, lw=2.2, marker='o', ms=3, label='n = 24, 36, … (острота пиков)')
+    k18 = [i for i, x in enumerate(en) if x <= 0.185]
+    sel = lambda key: [A[key][i] for i in k18]
+    ex = [en[i] for i in k18]
+    ax.plot(ex, sel('a1'), color=C1, lw=2.2, marker='o', ms=3, label='n = 1 (разностенность)')
+    ax.plot(ex, sel('a12s'), color=C12, lw=2.2, marker='o', ms=3, label='n = 12 со знаком (сегменты)')
+    ax.plot(ex, sel('sb'), color=CSB, lw=2.2, marker='o', ms=3, label='n = 11 и 13 (боковые полосы)')
+    ax.plot(ex, sel('a6'), color='#d03b3b', lw=2.2, marker='o', ms=3, label='n = 6 (шейки через сегмент)')
     ax.axhline(0, color=MUTED, lw=0.7)
-    ax.set_ylim(min(A['a12s']) - 0.004, max(max(A['a12s']), max(A['a1'])) * 1.12)
-    ax.text(0.10, min(A['a12s']) - 0.0028, 'n = 12 < 0: больше у кромок', fontsize=8.5, color=C12)
-    ax.text(0.012, max(A['a12s']) * 0.85, 'n = 12 > 0: больше под серединами', fontsize=8.5, color=C12)
+    lo = min(sel('a12s'))
+    ax.set_ylim(lo - 0.004, 0.03)
+    ax.text(0.10, lo - 0.0028, 'n = 12 < 0: больше у кромок', fontsize=8.5, color=C12)
+    ax.text(0.012, 0.026, 'n = 12 > 0: больше под серединами', fontsize=8.5, color=C12)
     ax.set_ylabel('амплитуда', color=INK)
-    ax.set_title('а) Амплитуды гармоник', loc='left', fontsize=11, color=INK)
+    ax.set_title('а) Начало: до ε_ном = 0.18 (линейная шкала)', loc='left', fontsize=11, color=INK)
     ax.legend(frameon=False, fontsize=8.5, loc='center left')
     ax = axs[1]
-    ax.plot(en, [100 * v / m for v, m in zip(A['a1'], A['a0'])], color=C1, lw=2.2, marker='o', ms=3, label='n = 1')
-    ax.plot(en, [100 * v / m for v, m in zip(A['a12s'], A['a0'])], color=C12, lw=2.2, marker='o', ms=3, label='n = 12 со знаком')
-    ax.plot(en, [100 * v / m for v, m in zip(A['sb'], A['a0'])], color=CSB, lw=2.2, marker='o', ms=3, label='n = 11 и 13')
-    ax.axhline(0, color=MUTED, lw=0.7); ax.axhline(100, color=MUTED, lw=0.5, ls=':')
-    ax.set_ylabel('% от средней деформации (n = 0)', color=INK)
-    ax.set_title('б) Относительно средней деформации', loc='left', fontsize=11, color=INK)
-    ax.legend(frameon=False, fontsize=8.5, loc='upper left')
+    for key, col, lab in (('a1', C1, 'n = 1'), ('a3', '#8e5bd6', 'n = 3'), ('a6', '#d03b3b', 'n = 6'),
+                          ('a12', C12, 'n = 12 (модуль)'), ('sb', CSB, 'n = 11 и 13')):
+        ax.plot(en, [100 * max(v, 1e-9) / m for v, m in zip(A[key], A['a0'])], color=col, lw=2.2, label=lab)
+    ax.set_yscale('log'); ax.set_ylim(0.05, 200)
+    ax.set_ylabel('% от средней деформации (лог.)', color=INK)
+    ax.set_title('б) Весь расчёт, в % от средней (лог. шкала)', loc='left', fontsize=11, color=INK)
+    ax.legend(frameon=False, fontsize=8.5, loc='lower right')
     ax = axs[2]
-    ax.plot(en, [abs(v) for v in A['smax']], color=INK, lw=2, marker='o', ms=4)
+    ax.plot(en, A['smax'], color=INK, lw=2, marker='o', ms=4)
     ax.axhline(PHE12, color=C12, lw=0.9, ls='--')
     ax.axhline(15, color=MUTED, lw=0.9, ls=':')
     ax.set_ylim(-0.8, 16.5)
     ax.text(0.012, PHE12 - 0.9, 'кромка сегмента (13.96°)', fontsize=8.5, color=C12)
     ax.text(0.012, 15.25, 'середина зазора (15°)', fontsize=8.5, color=MUTED)
     ax.text(0.012, 0.4, 'середина сегмента', fontsize=8.5, color=MUTED)
-    ax.text(0.012, 5.2, 'всё время сегмент 0 —\nна тонкой стороне\n(самая тонкая стенка при 3°)',
-            fontsize=9, color=INK)
+    # подписи этапов: где и в каком сегменте максимум (участки, где сегмент держится ≥ 2 кадров)
+    runs_, start = [], 0
+    for i in range(1, len(en) + 1):
+        if i == len(en) or A['segmax'][i] != A['segmax'][start] or (A['smax'][i] < 7) != (A['smax'][start] < 7):
+            if i - start >= 2:
+                runs_.append((en[start], en[i - 1], A['segmax'][start], A['smax'][start] < 7))
+            start = i
+    ytxt = 9.5
+    for x0, x1, sg, mid in runs_:
+        ax.text(0.5 * (x0 + x1), (2.6 if mid else 11.0), '%s\nсегмента %d' % ('середина' if mid else 'кромка', sg),
+                fontsize=8, color=INK, ha='center', va='center',
+                bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='none', alpha=0.85))
     ax.set_ylabel('расстояние максимума от середины сегмента, град', color=INK)
     ax.set_title('в) Где самая большая деформация', loc='left', fontsize=11, color=INK)
     for ax in axs:
@@ -351,7 +375,7 @@ def fig_growth(fr, out):
         ax.set_xlabel('номинальная деформация ε_ном', color=INK)
         style(ax)
     fig.suptitle('Как гармоники растут при раздаче: модель всего кольца, H = 3 мм, 12 сегментов, μ = 0.05 '
-                 '(расчёт до ε_ном = %.3f)' % en[-1], fontsize=13, color=INK, x=0.01, ha='left', y=1.02)
+                 '(расчёт до ε_ном = %.3f, дальше встал)' % en[-1], fontsize=13, color=INK, x=0.01, ha='left', y=1.02)
     fig.savefig(out, dpi=115, bbox_inches='tight', facecolor='white')
 
 
