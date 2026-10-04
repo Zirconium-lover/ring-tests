@@ -40,7 +40,7 @@ def read_deck(path):
     nodes, elems, sets, esets = {}, {}, {}, {}
     cur = name = None
     ur = ri = None
-    tet, size = 'kuhn', 0.1
+    tet, size, sector = 'kuhn', 0.1, 22.5
     full_seg = full_height = False
     for line in open(path):
         s = line.strip()
@@ -66,6 +66,9 @@ def read_deck(path):
             m = re.search(r'\bsize=([0-9.eE+-]+)', s)
             if m:
                 size = float(m.group(1))
+            m = re.search(r'\bsector=([0-9.eE+-]+)', s)
+            if m:
+                sector = float(m.group(1))
             full_seg = full_seg or 'full_seg=True' in s
             full_height = full_height or 'full_height=True' in s
             continue
@@ -97,11 +100,12 @@ def read_deck(path):
     # метка сетки: тип элемента, разбиение на тетраэдры (если не kuhn), шаг (если не 0.1)
     label = et + ('-x24' if et == 'C3D4' and tet == 'x24' else '')
     label += '-h%g' % size if abs(size - 0.1) > 1e-9 else ''
-    # сколько таких областей в кольце: 16 полусегментов или 8 сегментов,
-    # × 2 половины высоты (или 1 при полной высоте) — для силы на конусе
-    nsect = (8 if full_seg else 16) * (1 if full_height else 2)
+    # сколько таких областей в кольце: 2N полусегментов или N сегментов
+    # (sector = 180/N), × 2 половины высоты (или 1 при полной высоте) — для силы на конусе
+    nsect = round((180.0 if full_seg else 360.0) / sector) * (1 if full_height else 2)
     return dict(nodes=nodes, elems=elems, sets=sets, esets=esets, ur=ur, ri=ri,
-                H=H, mu=mu, elem=label, nsect=nsect, full_height=full_height)
+                H=H, mu=mu, elem=label, nsect=nsect, full_height=full_height, sector=sector,
+                nseg=round(180.0 / sector))
 
 
 HDR = re.compile(r'^\s*(total force|displacements|stresses|equivalent plastic strain)'

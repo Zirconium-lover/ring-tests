@@ -25,3 +25,8 @@ runs/stage1/*/
 runs/stage1/queue.log
 runs/stage2/decks/
 runs/stage2/*/
+# проверка числа сегментов: как этап 1 (прогоны добавляются явно после завершения)
+runs/nseg/decks/
+runs/nseg/.claims/
+runs/nseg/*/
+runs/nseg/queue.log
