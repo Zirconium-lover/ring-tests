@@ -11,6 +11,8 @@
   stage1_hotspot.png  — опасная точка (max PEEQ в середине высоты): η, σ_zz/σ_θθ
                         и концентрация ε_max/ε_ср от ε_ном, μ = 0.05;
   stage1_{profiles,hotspot}_C3D8I.png — то же для серии высот на C3D8I;
+  stage1_height.png   — max по дуге ε_θ в каждом ряду z внутренней поверхности
+                        (post/surfmap.json, tools/surfmap_stage1.py) по высоте;
   stage1_elements.png — H = 5, μ = 0.05 на C3D4, C3D8I и C3D20R (запирание);
   stage1_tetmesh.png  — то же для сеток C3D4 (6 и 24 тетраэдра, шаг 0.1 и 0.05);
 Таблица runs/stage1/summary.md — значения при ε_ном = 0.10 и 0.20 и
@@ -40,8 +42,10 @@ def load(rdir):
         ts = [{k: float(v) for k, v in r.items() if v != ''}
               for r in csv.DictReader(open(os.path.join(d, 'post', 'timeseries.csv')))]
         prof = json.load(open(os.path.join(d, 'post', 'profiles.json')))
+        sp = os.path.join(d, 'post', 'surfmap.json')
+        surf = json.load(open(sp)) if os.path.exists(sp) else None
         runs.append(dict(name=summ['run'], H=summ['H'], mu=summ['mu'], elem=summ['elem'],
-                         summ=summ, ts=ts, prof=prof))
+                         summ=summ, ts=ts, prof=prof, surf=surf))
     return runs
 
 
@@ -192,6 +196,39 @@ def fig_elements(runs, out, elems=('C3D4', 'C3D8I', 'C3D20R'), H=5.0, mu=0.05,
     fig.savefig(out, dpi=140, bbox_inches='tight', facecolor='white')
 
 
+def fig_height(runs, out, mu=0.05):
+    """ε_θ,max по дуге в каждом ряду z (внутр. поверхность, surfmap.json) по высоте."""
+    rows = [('C3D4', 'C3D4 (6 тетраэдров, шаг 0.1)'), ('C3D8I', 'C3D8I; чёрный — C3D20R, H = 5')]
+    have = [r for r in runs if r.get('surf')]
+    if not have:
+        return
+    fig, axs = plt.subplots(len(rows), len(TARGETS), figsize=(6.2 * len(TARGETS), 4.3 * len(rows)),
+                            squeeze=False)
+    for i, (elem, lab) in enumerate(rows):
+        sel = sorted((r for r in have if r['mu'] == mu and r['elem'] == elem), key=lambda r: r['H'])
+        ref = [r for r in have if r['mu'] == mu and r['elem'] == 'C3D20R'] if elem == 'C3D8I' else []
+        for j, x in enumerate(TARGETS):
+            ax = axs[i][j]
+            for r in sel + ref:
+                f = min(r['surf']['frames'], key=lambda f: abs(f['eps_nom'] - x))
+                d = [0.5 * r['H'] - z for z in f['z']]
+                c = INK if r['elem'] == 'C3D20R' else H_COL.get(r['H'], INK)
+                ax.plot(d, f['emax'], color=c, lw=2 if r['elem'] != 'C3D20R' else 1.4,
+                        ls='-' if r['elem'] != 'C3D20R' else '--',
+                        label='H = %g мм%s' % (r['H'], ', C3D20R' if r['elem'] == 'C3D20R' else ''))
+                ax.plot(d[0], f['emax'][0], 'o', color=c, ms=5)
+            ax.set_title('%s, ε_ном ≈ %.2f' % (lab, x), fontsize=10.5, color=INK, loc='left')
+            ax.set_xlabel('расстояние от свободного торца, мм (точка — середина высоты)', color=INK)
+            ax.set_ylabel('max по дуге ε_θ, внутр. поверхность', color=INK)
+            style(ax)
+            if j == 0:
+                ax.legend(frameon=False, fontsize=9)
+    fig.suptitle('Этап 1, μ = %g: наибольшая окружная деформация по высоте кольца' % mu,
+                 fontsize=12, color=INK, x=0.01, ha='left')
+    fig.tight_layout()
+    fig.savefig(out, dpi=140, bbox_inches='tight', facecolor='white')
+
+
 def table(runs, out):
     keys = [('epsmax_IN_Z0', 'ε_θ,max сер.'), ('epsmax_IN_ZTOP', 'ε_θ,max торец'),
             ('hs_z0_eta', 'η'), ('hs_z0_szz_stt', 'σzz/σθθ'), ('tmin_Z0', 't_min/t0'),
@@ -247,6 +284,7 @@ def main():
     if sum(r['elem'] == 'C3D8I' for r in runs) > 1:
         fig_profiles(runs, os.path.join(a.figs, 'stage1_profiles_C3D8I.png'), elem='C3D8I')
         fig_hotspot(runs, os.path.join(a.figs, 'stage1_hotspot_C3D8I.png'), elem='C3D8I')
+    fig_height(runs, os.path.join(a.figs, 'stage1_height.png'))
     fig_elements(runs, os.path.join(a.figs, 'stage1_elements.png'))
     fig_elements(runs, os.path.join(a.figs, 'stage1_tetmesh.png'),
                  elems=('C3D4', 'C3D4-x24', 'C3D4-h0.05', 'C3D20R'),
