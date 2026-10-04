@@ -23,3 +23,5 @@ runs/**/post.log
 runs/stage1/*/
 # журнал очереди дописывается во время серии; финальная версия добавляется явно
 runs/stage1/queue.log
+runs/stage2/decks/
+runs/stage2/*/

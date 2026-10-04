@@ -8,6 +8,11 @@
 симметрии: φ = 0 (u_y = 0), φ = 22.5° (уравнение −sin α·u_x + cos α·u_y = 0),
 z = 0 (u_z = 0). Торец z = H/2 свободен.
 
+Этап 2 (--full-seg --full-height): полный сегмент φ от −22.5° до 22.5°
+(плоскости симметрии только в серединах зазоров, на обеих — уравнение
+нормального перемещения) × полная высота z от −H/2 до H/2 (оба торца
+свободны); осевое смещение кольца как целого держит один узел HOLD.
+
 Сегмент — жёсткий: слой C3D8, все узлы ведутся перемещением u_x = u_r(t)
 вдоль биссектрисы сегмента (ось x), что эквивалентно ходу конуса
 u_z = u_r / tan(θ/2). Наружная поверхность сегмента — цилиндр R_i − clear,
@@ -72,9 +77,15 @@ def build(a):
     m = Mesh()
     alpha = math.radians(a.sector)
     t = a.ro - a.ri
+    # сектор: φ от 0 (середина сегмента) или от −α (полный сегмент) до α;
+    # высота: z от 0 (середина, симметрия) или от −H/2 (полная высота) до H/2
+    phi_lo = -alpha if a.full_seg else 0.0
+    z_lo = -0.5 * a.H if a.full_height else 0.0
     nr = max(2, round(t / a.size))
-    nphi = max(4, round(alpha * a.ri / a.size))
-    nz = max(2, round(0.5 * a.H / a.size))
+    # полный сегмент / полная высота — чётное число элементов, чтобы φ = 0
+    # (середина сегмента) и z = 0 были линиями сетки, а сетка — симметричной
+    nphi = max(4, round(alpha * a.ri / a.size)) * (2 if a.full_seg else 1)
+    nz = max(2, round(0.5 * a.H / a.size)) * (2 if a.full_height else 1)
     a.nr, a.nphi, a.nz = nr, nphi, nz
     quad = a.elem == 'C3D20R'
     x24 = a.elem == 'C3D4' and a.tet == 'x24'
@@ -83,7 +94,7 @@ def build(a):
     for I in range(f * nr + 1):
         r = a.ri + t * I / (f * nr)
         for J in range(f * nphi + 1):
-            ph = alpha * J / (f * nphi)
+            ph = phi_lo + (alpha - phi_lo) * J / (f * nphi)
             for K in range(f * nz + 1):
                 odd = (I % 2) + (J % 2) + (K % 2)
                 if quad and odd > 1:
@@ -91,14 +102,15 @@ def build(a):
                 if x24 and odd == 1:
                     continue      # середины рёбер у x24 не нужны
                 ring[I, J, K] = m.node(r * math.cos(ph), r * math.sin(ph),
-                                       0.5 * a.H * K / (f * nz))
+                                       z_lo + (0.5 * a.H - z_lo) * K / (f * nz))
     # C3D20R: углы как у C3D8, затем середины рёбер 1-2, 2-3, 3-4, 4-1,
     # 5-6, 6-7, 7-8, 8-5, 1-5, 2-6, 3-7, 4-8 (в удвоенных индексах)
     Q20 = [(0, 0, 0), (2, 0, 0), (2, 2, 0), (0, 2, 0), (0, 0, 2), (2, 0, 2), (2, 2, 2), (0, 2, 2),
            (1, 0, 0), (2, 1, 0), (1, 2, 0), (0, 1, 0), (1, 0, 2), (2, 1, 2), (1, 2, 2), (0, 1, 2),
            (0, 0, 1), (2, 0, 1), (2, 2, 1), (0, 2, 1)]
     eid = 0
-    sec_z0, sec_ztop = [], []
+    sec_z0, sec_ztop, sec_zbot = [], [], []
+    kmid = (nz // 2 - 1, nz // 2) if a.full_height else (0,)   # слои у z = 0
     for i in range(nr):
         for j in range(nphi):
             for k in range(nz):
@@ -133,13 +145,18 @@ def build(a):
                     else:
                         eid += 1
                         m.elems.append((eid, a.elem, hx))
-                if k == 0:
+                if k in kmid:
                     sec_z0 += list(range(first, eid + 1))
                 if k == nz - 1:
                     sec_ztop += list(range(first, eid + 1))
+                if a.full_height and k == 0:
+                    sec_zbot += list(range(first, eid + 1))
     nring_el = eid
     m.elsets = {'SEC_Z0': sec_z0, 'SEC_ZTOP': sec_ztop}
+    if a.full_height:
+        m.elsets['SEC_ZBOT'] = sec_zbot
     NR, NP, NZ = f * nr, f * nphi, f * nz
+    KM = NZ // 2 if a.full_height else 0       # ряд узлов z = 0
     g = lambda I, J, K: ring.get((I, J, K))
     pick = lambda cond: [n for (I, J, K), n in ring.items() if cond(I, J, K)]
     sets = {
@@ -151,26 +168,34 @@ def build(a):
         'ZTOP': pick(lambda I, J, K: K == NZ),
         # линии для постобработки: внутренняя и наружная поверхность
         # в середине высоты и на торце, по всей дуге
-        'IN_Z0': pick(lambda I, J, K: I == 0 and K == 0),
-        'OUT_Z0': pick(lambda I, J, K: I == NR and K == 0),
+        'IN_Z0': pick(lambda I, J, K: I == 0 and K == KM),
+        'OUT_Z0': pick(lambda I, J, K: I == NR and K == KM),
         'IN_ZTOP': pick(lambda I, J, K: I == 0 and K == NZ),
         'OUT_ZTOP': pick(lambda I, J, K: I == NR and K == NZ),
     }
+    if a.full_height:
+        sets['IN_ZBOT'] = pick(lambda I, J, K: I == 0 and K == 0)
+        sets['OUT_ZBOT'] = pick(lambda I, J, K: I == NR and K == 0)
+        # осевое смещение кольца как целого: один узел на наружной поверхности
+        # в середине сегмента и середине высоты
+        sets['HOLD'] = [ring[NR, NP // 2, NZ // 2]]
     # --- жёсткий сегмент ---
     phe = alpha - (0.5 * a.kerf) / a.ri
     a.phi_edge_deg = math.degrees(phe)
     rs_out = a.ri - a.clear
     rs_in = rs_out - a.seg_t
     zt = 0.5 * a.H + a.seg_over
-    ns_p = max(8, round(phe * rs_out / a.seg_size))
-    ns_z = max(2, round(zt / max(a.seg_size, 0.25)))
+    zb = -zt if a.full_height else 0.0
+    phs = -phe if a.full_seg else 0.0
+    ns_p = max(8, round((phe - phs) * rs_out / a.seg_size))
+    ns_z = max(2, round((zt - zb) / max(a.seg_size, 0.25)))
     seg = {}
     for i in range(2):
         r = rs_in + (rs_out - rs_in) * i
         for j in range(ns_p + 1):
-            ph = phe * j / ns_p
+            ph = phs + (phe - phs) * j / ns_p
             for k in range(ns_z + 1):
-                seg[i, j, k] = m.node(r * math.cos(ph), r * math.sin(ph), zt * k / ns_z)
+                seg[i, j, k] = m.node(r * math.cos(ph), r * math.sin(ph), zb + (zt - zb) * k / ns_z)
     seg_faces = []
     for j in range(ns_p):
         for k in range(ns_z):
@@ -211,7 +236,7 @@ def write(a):
     alpha = math.radians(a.sector)
     e0 = swift_e0(a.K, a.n, a.s02)
     L = []
-    L.append('** Этап 1: сектор кольца на сегментной оправке (tools/mksector.py)')
+    L.append('** Сектор кольца на сегментной оправке (tools/mksector.py)')
     L.append('** ' + ' '.join('%s=%s' % (k, v) for k, v in sorted(vars(a).items()) if k != 'o'))
     L.append('*Node')
     L += ['%d, %.9f, %.9f, %.9f' % (n, *xyz) for n, xyz in m.nodes.items()]
@@ -242,7 +267,9 @@ def write(a):
     if a.damage:
         L.append('*Damage Initiation, Criterion=Ductile, Evolution=Displacement, '
                  'Npoints=%d' % (len(a.epsf_eta) // 2))
-        L.append('1.0, %g, %s' % (a.uf, ', '.join('%g' % v for v in a.epsf_eta)))
+        # константы: ω_D = 1, u_f, затем пары (η, ε_f); не больше 8 чисел в строке
+        vals = ['1.0', '%g' % a.uf] + ['%g' % v for v in a.epsf_eta]
+        L += [', '.join(vals[i:i + 8]) for i in range(0, len(vals), 8)]
     L.append('*Solid Section, Elset=RING, Material=E635')
     L.append('*Material, Name=SEGMENT_STEEL')
     L.append('*Elastic')
@@ -270,25 +297,31 @@ def write(a):
         L.append('RING_IN_NODES, SEG_OUT')
     L.append('*Equation')
     s, c = math.sin(alpha), math.cos(alpha)
-    for n in sorted(set(sets['PHI1'])):
+    for n in sorted(set(sets['PHI1'])):          # φ = α: −sin α·u_x + cos α·u_y = 0
         L.append('2')
         L.append('%d, 2, %.12f, %d, 1, %.12f' % (n, c, n, -s))
+    if a.full_seg:
+        for n in sorted(set(sets['PHI0'])):      # φ = −α: sin α·u_x + cos α·u_y = 0
+            L.append('2')
+            L.append('%d, 2, %.12f, %d, 1, %.12f' % (n, c, n, s))
     L.append('*Step, Nlgeom, Inc=%d' % a.maxinc)
     L.append('*Static')
     L.append('%g, 1., %g, %g' % (a.dt0, a.dtmin, a.dtmax))
     L.append('*Boundary')
-    L.append('PHI0, 2, 2, 0.')
-    L.append('ZBOT, 3, 3, 0.')
+    if not a.full_seg:
+        L.append('PHI0, 2, 2, 0.')
+    L.append(('HOLD' if a.full_height else 'ZBOT') + ', 3, 3, 0.')
     L.append('SEGNODES, 1, 1, %g' % a.ur)
     L.append('SEGNODES, 2, 3, 0.')
     L.append('*Node Print, Nset=SEGNODES, Totals=Only, Frequency=%d' % a.printfreq)
     L.append('RF')
-    for name in ('IN_Z0', 'OUT_Z0', 'IN_ZTOP', 'OUT_ZTOP'):
+    lines_out = ('IN_Z0', 'OUT_Z0', 'IN_ZTOP', 'OUT_ZTOP') + (('IN_ZBOT', 'OUT_ZBOT') if a.full_height else ())
+    for name in lines_out:
         L.append('*Node Print, Nset=%s, Frequency=%d' % (name, a.printfreq))
         L.append('U')
     # слои элементов в середине высоты и у торца (вся толщина и дуга):
     # напряжения и PEEQ для трёхосности и σ_zz в опасной точке
-    for name in ('SEC_Z0', 'SEC_ZTOP'):
+    for name in ('SEC_Z0', 'SEC_ZTOP') + (('SEC_ZBOT',) if a.full_height else ()):
         L.append('*El Print, Elset=%s, Frequency=%d' % (name, a.printfreq))
         L.append('S, PEEQ')
     # В CalculiX FREQUENCY у *NODE PRINT и *NODE FILE пишется в одну
@@ -317,6 +350,10 @@ def parser():
     ap.add_argument('--ri', type=float, default=5.5)
     ap.add_argument('--ro', type=float, default=6.3)
     ap.add_argument('--sector', type=float, default=22.5, help='180/число сегментов, град')
+    ap.add_argument('--full-seg', dest='full_seg', action='store_true',
+                    help='полный сегмент: φ от −sector до +sector (плоскости симметрии — середины зазоров)')
+    ap.add_argument('--full-height', dest='full_height', action='store_true',
+                    help='полная высота: z от −H/2 до H/2, оба торца свободны')
     ap.add_argument('--size', type=float, default=0.1, help='размер элемента кольца, мм')
     ap.add_argument('--elem', choices=('C3D4', 'C3D8I', 'C3D8', 'C3D20R'), default='C3D4')
     ap.add_argument('--tet', choices=('kuhn', 'x24'), default='kuhn',

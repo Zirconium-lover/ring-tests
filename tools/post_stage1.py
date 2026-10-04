@@ -41,6 +41,7 @@ def read_deck(path):
     cur = name = None
     ur = ri = None
     tet, size = 'kuhn', 0.1
+    full_seg = full_height = False
     for line in open(path):
         s = line.strip()
         if s.startswith('**'):
@@ -65,6 +66,8 @@ def read_deck(path):
             m = re.search(r'\bsize=([0-9.eE+-]+)', s)
             if m:
                 size = float(m.group(1))
+            full_seg = full_seg or 'full_seg=True' in s
+            full_height = full_height or 'full_height=True' in s
             continue
         if s.startswith('*'):
             kw = s.lower()
@@ -94,8 +97,11 @@ def read_deck(path):
     # метка сетки: тип элемента, разбиение на тетраэдры (если не kuhn), шаг (если не 0.1)
     label = et + ('-x24' if et == 'C3D4' and tet == 'x24' else '')
     label += '-h%g' % size if abs(size - 0.1) > 1e-9 else ''
+    # сколько таких областей в кольце: 16 полусегментов или 8 сегментов,
+    # × 2 половины высоты (или 1 при полной высоте) — для силы на конусе
+    nsect = (8 if full_seg else 16) * (1 if full_height else 2)
     return dict(nodes=nodes, elems=elems, sets=sets, esets=esets, ur=ur, ri=ri,
-                H=H, mu=mu, elem=label)
+                H=H, mu=mu, elem=label, nsect=nsect, full_height=full_height)
 
 
 HDR = re.compile(r'^\s*(total force|displacements|stresses|equivalent plastic strain)'
@@ -234,7 +240,7 @@ def main():
         u = {k: {int(r[0]): r[1:4] for r in fr.get(('U', k), [])} for k in o}
         if not all(u[k] for k in o):
             continue
-        row = dict(time=t, ur=t * ur, eps_nom=t * ur / ri, Fx=fx, Fz=NSECT * fx * TANH)
+        row = dict(time=t, ur=t * ur, eps_nom=t * ur / ri, Fx=fx, Fz=deck['nsect'] * fx * TANH)
         pr = {}
         for k in o:
             ph, ep, em = hoop_profile(deck, o[k], u[k])
