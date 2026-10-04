@@ -198,6 +198,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--runs', default='runs/stage1')
     ap.add_argument('--figs', default='notes/figs')
+    ap.add_argument('--table', default=None, help='путь таблицы (по умолчанию RUNS/summary.md)')
     a = ap.parse_args()
     runs = load(a.runs)
     print('runs:', ', '.join(r['name'] for r in runs))
@@ -205,8 +206,9 @@ def main():
     fig_force(runs, os.path.join(a.figs, 'stage1_force.png'))
     fig_profiles(runs, os.path.join(a.figs, 'stage1_profiles.png'))
     fig_hotspot(runs, os.path.join(a.figs, 'stage1_hotspot.png'))
-    table(runs, os.path.join(a.runs, 'summary.md'))
-    print('written figures and', os.path.join(a.runs, 'summary.md'))
+    tpath = a.table or os.path.join(a.runs, 'summary.md')
+    table(runs, tpath)
+    print('written figures and', tpath)
 
 
 if __name__ == '__main__':
