@@ -15,3 +15,4 @@ runs/**/run.log
 runs/**/m.cvg
 runs/**/m.inp
 runs/**/m.de1stats
+runs/stage1/decks/

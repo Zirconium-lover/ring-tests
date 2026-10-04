@@ -12,6 +12,7 @@ set -u
 : "${CCX_ARCH2:?set CCX_ARCH2 to the ccx-arch2 checkout}"
 DECK=${1:?deck}; RUN_DIR=${2:?run dir}; shift 2
 EXE=${CCX_EXE:-"$CCX_ARCH2/build-mkl/ccx_2.23_pardiso"}
+SOLVER_COMMIT=$(git -C "$CCX_ARCH2" rev-parse HEAD 2>/dev/null)
 [ -x "$EXE" ] || { echo "solver not found: $EXE" >&2; exit 2; }
 case "$RUN_DIR" in /*) ;; *) RUN_DIR="$PWD/$RUN_DIR" ;; esac
 NCPU=$(nproc)
@@ -56,14 +57,18 @@ for kv in "$@"; do
     if [ -z "$value" ]; then unset "$name"; else export "$kv"; fi
 done
 
+# CCX_ARCH2 — путь для наших скриптов; решатель считает её неизвестным
+# переключателем и пишет предупреждение в [SWITCHES], поэтому убираем
+unset CCX_ARCH2
+
 mkdir -p "$RUN_DIR"
-cp "$DECK" "$RUN_DIR/m.inp"
+[ "$(realpath "$DECK")" = "$(realpath -m "$RUN_DIR/m.inp")" ] || cp "$DECK" "$RUN_DIR/m.inp"
 {
     echo "deck=$DECK"
     echo "deck_sha256=$(sha256sum "$DECK" | awk '{print $1}')"
     echo "executable=$EXE"
     echo "executable_sha256=$(sha256sum "$EXE" | awk '{print $1}')"
-    echo "solver_commit=$(git -C "$CCX_ARCH2" rev-parse HEAD 2>/dev/null)"
+    echo "solver_commit=$SOLVER_COMMIT"
     echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "overrides=$*"
     echo "--- environment ---"
