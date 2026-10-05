@@ -67,7 +67,8 @@ def section(ax, z, zc):
     ax.set_xlabel("TD, мкм"); ax.set_ylabel("ND (r), мкм")
 
 
-fig = plt.figure(figsize=(15, 9.5), facecolor=BG)
+fig = plt.figure(figsize=(16, 9.5), facecolor=BG)
+fig.subplots_adjust(wspace=0.45)
 for row, s in enumerate((0, 250)):
     fn = os.path.join(D, f"d3_sL21.0_s{s}_seed1")
     z = np.load(fn + ".npz"); m = json.load(open(fn + ".json"))
