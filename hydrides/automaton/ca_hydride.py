@@ -62,6 +62,8 @@ class Params:
     seed: int = 0
     record_every: int = 0             # сохранять снимки по ходу (0 — нет)
     g_extra: object = None            # добавка к выгоде по клеткам, МПа (напряжения несовместности из МКЭ), массив (ny, nx)
+    init_plates: object = None        # пластинки, оставшиеся с прошлого цикла (не растворились): [(cy, cx, ψ, полудлина), ...]
+    schedule: object = None           # schedule(progress 0..1) → dict(T, beta, sigma_cap, sigma_app, g_extra) — ход охлаждения
 
 
 # ------------------------------------------------------------------ зёрна и текстура
@@ -207,7 +209,9 @@ def grow(c_idx, psi, grains, occ, p):
 # ------------------------------------------------------------------ прогон
 def run(p: Params, verbose=False, callback=None):
     """callback(plates, expo, hyd, cH) вызывается перед выбором каждой новой пластинки
-    (expo — логарифм веса зарождения по клеткам; −inf там, где нельзя)."""
+    (expo — логарифм веса зарождения по клеткам; −inf там, где нельзя).
+    p.init_plates — пластинки, которые уже есть до охлаждения (нерастворившиеся);
+    p.schedule(progress) — параметры шага по ходу выпадения (температура, β, потолок, напряжение)."""
     global EPS_N, EPS_T
     EPS_N, EPS_T = p.eps_n, p.eps_t
     rng = np.random.default_rng(p.seed)
@@ -217,22 +221,24 @@ def run(p: Params, verbose=False, callback=None):
     psi_map = gpsi[grains]
     e11n, e22n, e12n = eigen_components_for(psi_map)
     e33n = EPS_T
-    # приложенное напряжение: σ_xx = σ_app (вдоль TD), возможно с градиентом по толщине (ND)
     yfrac = (np.arange(ny) + 0.5) / ny
-    sapp = (p.sigma_app + p.sigma_app_grad * (0.5 - yfrac))[:, None] * np.ones((1, nx))
     # приложенное напряжение выбирает ориентацию пластинки: работа над той частью несоответствия,
     # что зависит от ориентации (ε11 − среднее по ориентациям). Средняя часть (σ·ε̄) от ориентации
     # не зависит; при неоднородном σ она лишь гнала бы весь водород в растянутую зону, а реальное
     # перераспределение водорода по Горскому мало: c ∝ exp(V_H·σ_h/RT), V_H ≈ 1.7 см³/моль.
     e_mean = 0.5 * (EPS_N + EPS_T)
-    g_app = sapp * (e11n - e_mean) / EPS_N                    # эффективное напряжение, МПа
-    gorsky = p.v_h_over_rt * sapp / 3.0 if p.v_h_over_rt else 0.0
+
+    def applied(sig):
+        """σ_xx = sig (вдоль TD), возможно с градиентом по толщине (ND) → (g_app, вклад Горского)."""
+        sapp = (sig + p.sigma_app_grad * (0.5 - yfrac))[:, None] * np.ones((1, nx))
+        return sapp * (e11n - e_mean) / EPS_N, (p.v_h_over_rt * sapp / 3.0 if p.v_h_over_rt else 0.0)
+
+    g_app, gorsky = applied(p.sigma_app)
     S11 = np.zeros((ny, nx)); S22 = np.zeros_like(S11); S12 = np.zeros_like(S11); S33 = np.zeros_like(S11)
     E11 = np.zeros_like(S11); E22 = np.zeros_like(S11); E12 = np.zeros_like(S11); E33 = np.zeros_like(S11)
     occ = np.zeros((ny, nx), bool)          # занято пластинками (с зазором)
     hyd = np.zeros((ny, nx))                # доля гидрида в клетке
     plates = []
-    target = p.frac * ny * nx
     tried = np.zeros((ny, nx), bool)
     snaps = []
     # поле доступного водорода: 1 — исходное пересыщение; пластинка истощает окрестность ~capture_um
@@ -240,12 +246,43 @@ def run(p: Params, verbose=False, callback=None):
     if p.capture_um > 0:
         ky = np.fft.fftfreq(ny, p.dx)[:, None]; kx = np.fft.rfftfreq(nx, p.dx)[None, :]
         Gk = np.exp(-2 * (np.pi * p.capture_um) ** 2 * (kx ** 2 + ky ** 2))
+
+    def add_plate(c, psi, half, deplete=True):
+        nonlocal cH
+        ys, xs, fr, (a11, a22, a12, a33) = plate_eigen((ny, nx), p.dx, c, psi, half, p.h_um)
+        sel = np.ix_(ys, xs)
+        hyd[sel] = np.clip(hyd[sel] + fr, 0, 1)
+        if deplete and p.capture_um > 0:
+            add = np.zeros((ny, nx)); add[sel] = fr
+            cH -= np.fft.irfft2(np.fft.rfft2(add) * Gk, s=(ny, nx)) / p.frac
+        E11[:] = 0; E22[:] = 0; E12[:] = 0; E33[:] = 0
+        E11[sel] = fr * a11; E22[sel] = fr * a22; E12[sel] = fr * a12; E33[sel] = fr * a33
+        d11, d22, d12, d33 = el.stress(E11, E22, E12, E33)
+        S11[:] += d11; S22[:] += d22; S12[:] += d12; S33[:] += d33
+        occ[:] |= ndi.binary_dilation(hyd > 0.2, iterations=1)
+
+    # нерастворившиеся пластинки: поле и место есть, водород вокруг уже выровнялся
+    if p.init_plates is not None:
+        for cy, cx, psi, half in p.init_plates:
+            add_plate(np.array([cy, cx]), psi, half, deplete=False)
+            iy, ix = int(cy / p.dx) % ny, int(cx / p.dx) % nx
+            plates.append(dict(c=np.array([cy, cx]), psi=float(psi), half=float(half), grain=int(grains[iy, ix]),
+                               T=None, init=True))
+    hyd0 = hyd.sum()
+    target = hyd0 + p.frac * ny * nx
+    beta, cap, sig, T, g_extra = p.beta, p.sigma_cap, p.sigma_app, None, p.g_extra
     while hyd.sum() < target:
+        if p.schedule is not None:
+            st = p.schedule((hyd.sum() - hyd0) / (target - hyd0))
+            beta = st.get("beta", beta); cap = st.get("sigma_cap", cap); T = st.get("T", T)
+            g_extra = st.get("g_extra", g_extra)
+            if "sigma_app" in st and st["sigma_app"] != sig:
+                sig = st["sigma_app"]; g_app, gorsky = applied(sig)
         g_int = (e11n * S11 + e22n * S22 + 2 * e12n * S12 + e33n * S33) / EPS_N * p.kappa
-        g_int = np.clip(g_int, -p.sigma_cap, p.sigma_cap)
-        expo = p.beta * (g_int + g_app) + gorsky
-        if p.g_extra is not None:
-            expo = expo + p.beta * p.g_extra
+        g_int = np.clip(g_int, -cap, cap)
+        expo = beta * (g_int + g_app) + gorsky
+        if g_extra is not None:
+            expo = expo + beta * g_extra
         if p.beta_h:
             expo = expo + p.beta_h * p.kappa * (1 + p.nu) * (S11 + S22) / 3
         allowed = ~occ & ~tried
@@ -266,19 +303,9 @@ def run(p: Params, verbose=False, callback=None):
         if 2 * half < p.L_min:
             tried[c_idx] = True                 # зародыш не вырос: в эту клетку больше не пробуем
             continue
-        ys, xs, fr, (a11, a22, a12, a33) = plate_eigen((ny, nx), p.dx, c, psi, half, p.h_um)
-        sel = np.ix_(ys, xs)
-        hyd[sel] = np.clip(hyd[sel] + fr, 0, 1)
-        if p.capture_um > 0:
-            add = np.zeros((ny, nx)); add[sel] = fr
-            cH -= np.fft.irfft2(np.fft.rfft2(add) * Gk, s=(ny, nx)) / p.frac
-        E11[:] = 0; E22[:] = 0; E12[:] = 0; E33[:] = 0
-        E11[sel] = fr * a11; E22[sel] = fr * a22; E12[sel] = fr * a12; E33[sel] = fr * a33
-        d11, d22, d12, d33 = el.stress(E11, E22, E12, E33)
-        S11 += d11; S22 += d22; S12 += d12; S33 += d33
-        occ |= ndi.binary_dilation(hyd > 0.2, iterations=1)
+        add_plate(c, psi, half)
         tried[:] = False
-        plates.append(dict(c=c, psi=float(psi), half=float(half), grain=int(grains[c_idx])))
+        plates.append(dict(c=c, psi=float(psi), half=float(half), grain=int(grains[c_idx]), T=T, init=False))
         if p.record_every and len(plates) % p.record_every == 0:
             snaps.append(hyd.copy())
         if verbose and len(plates) % 50 == 0:
