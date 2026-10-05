@@ -29,6 +29,7 @@
 | `fig_*.py`, `make_figs.py` | рисунки в `figs/` |
 | `anim_growth.py` | анимация роста: без нагрузки и при 250 МПа (`figs/anim_growth.mp4`, `.gif`) |
 | `film/` | ролик в Manim: как работает автомат, рост, проверка, прогноз (см. `film/README.md`) |
+| `fe/` | МКЭ одной пластинки (CalculiX): сверка Фурье-ядра и пластичность вместо σ_cap (см. `fe/README.md`) |
 
 ```bash
 python -c "from ca_hydride import Params, run; r = run(Params(sigma_app=250, beta=0.12, sigma_cap=90))"
