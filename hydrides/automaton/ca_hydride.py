@@ -65,6 +65,10 @@ class Params:
     init_plates: object = None        # пластинки, оставшиеся с прошлого цикла (не растворились): [(cy, cx, ψ, полудлина), ...]
     schedule: object = None           # schedule(progress 0..1) → dict(T, beta, sigma_cap, sigma_app, g_extra) — ход охлаждения
     cap_local_only: bool = False      # потолок только на ближнее поле; среднее напряжение в металле — без потолка
+    screen: bool = False              # экранирование приложенного напряжения у гидридов (пластическая зона, МКЭ)
+    screen_scale: float = 1.0         # масштаб расстояний профиля экранирования (1 — как у пластинки 5 × 0.6 мкм в МКЭ)
+    screen_d: tuple = (0.0, 0.75, 1.25, 1.75, 2.5, 3.5)        # расстояние до гидрида, мкм
+    screen_s: tuple = (0.05, 0.08, 0.45, 0.45, 0.70, 1.0)      # доля действия приложенного напряжения (fe/biax_inh.py)
 
 
 # ------------------------------------------------------------------ зёрна и текстура
@@ -248,6 +252,16 @@ def run(p: Params, verbose=False, callback=None):
         ky = np.fft.fftfreq(ny, p.dx)[:, None]; kx = np.fft.rfftfreq(nx, p.dx)[None, :]
         Gk = np.exp(-2 * (np.pi * p.capture_um) ** 2 * (kx ** 2 + ky ** 2))
 
+    scr = np.ones((ny, nx))                 # экранирование приложенного напряжения
+
+    def update_screen():
+        """Доля действия приложенного напряжения на выбор ориентации в зависимости от расстояния до гидрида:
+        в пластической зоне у гидрида матрица на пределе текучести и лишнего девиатора не держит (МКЭ)."""
+        m = int(np.ceil(max(p.screen_d) * p.screen_scale / p.dx)) + 2
+        solid = np.pad(hyd > 0.2, m, mode="wrap")
+        d = ndi.distance_transform_edt(~solid)[m:m + ny, m:m + nx] * p.dx
+        scr[:] = np.interp(d / p.screen_scale, p.screen_d, p.screen_s)
+
     def add_plate(c, psi, half, deplete=True):
         nonlocal cH
         ys, xs, fr, (a11, a22, a12, a33) = plate_eigen((ny, nx), p.dx, c, psi, half, p.h_um)
@@ -261,6 +275,8 @@ def run(p: Params, verbose=False, callback=None):
         d11, d22, d12, d33 = el.stress(E11, E22, E12, E33)
         S11[:] += d11; S22[:] += d22; S12[:] += d12; S33[:] += d33
         occ[:] |= ndi.binary_dilation(hyd > 0.2, iterations=1)
+        if p.screen:
+            update_screen()
 
     # нерастворившиеся пластинки: поле и место есть, водород вокруг уже выровнялся
     if p.init_plates is not None:
@@ -288,7 +304,7 @@ def run(p: Params, verbose=False, callback=None):
             g_int = np.clip(g_int - g_mean, -cap, cap) + g_mean
         else:
             g_int = np.clip(g_int, -cap, cap)
-        expo = beta * (g_int + g_app) + gorsky
+        expo = beta * (g_int + (g_app * scr if p.screen else g_app)) + gorsky
         if g_extra is not None:
             expo = expo + beta * g_extra
         if p.beta_h:
