@@ -15,9 +15,12 @@ from dataclasses import dataclass
 import numpy as np
 import os
 import scipy.fft as sfft
+from scipy import ndimage
 from scipy.spatial import cKDTree
 
 EPS_N, EPS_T = 0.0720, 0.0458
+C_OVER_A = 1.593                                         # α-Zr
+HABIT_DEG = float(np.degrees(np.arctan(2.0 * C_OVER_A / (7.0 * np.sqrt(3.0)))))   # угол (10-17) к (0001): 14.7°
 WORKERS = int(os.environ.get("CA3D_WORKERS", "1"))      # потоки FFT по всему кубу (при пуле процессов — 1)
 
 
@@ -43,12 +46,15 @@ class P3:
     seed: int = 1
     # кристаллография микрогидрида (shape="needle"): вытянутая пластинка в базисной плоскости,
     # длинная ось вдоль одного из трёх ⟨11-20⟩ зерна (Carpenter; Perovic; Patel 2021)
-    shape: str = "disc"                     # "disc" — круглый диск (пилот); "needle" — пластинка вдоль ⟨11-20⟩
+    shape: str = "disc"                     # "disc" — круглый диск (пилот); "needle" — пластинка вдоль ⟨11-20⟩;
+                                            # "segment" — отрезок макрогидрида в зерне на плоскости {10-17}
     prism: str = "10-10"                    # призматическая текстура: ⟨10-10⟩ ∥ оси трубы (CWSR), "11-20" (RX), "random"
     prism_s: float = 10.0                   # разброс поворота вокруг оси c, град
     A_max: float = 3.0                      # наибольшая полудлина вдоль ⟨11-20⟩, мкм (длина до 6 мкм, как в 2D)
     B_max: float = 0.5                      # наибольшая полуширина поперёк, мкм
     A_min: float = 0.5                      # меньше — зародыш не растёт
+    R_seg: float = 4.0                      # отрезок {10-17}: наибольшее удаление от зародыша в плоскости, мкм
+    S_min: float = 0.8                      # наименьшая площадь отрезка, мкм² (≈ диск R = 0.5)
 
 
 def make_grains3(p, rng):
@@ -94,6 +100,53 @@ def needle_dirs(c, a1):
     """Три оси ⟨11-20⟩ зерна (через 120° в базисной плоскости)."""
     w = np.cross(c, a1)
     return [np.cos(t) * a1 + np.sin(t) * w for t in np.radians((0.0, 120.0, 240.0))]
+
+
+def habit_normals(c, a1, tilt_deg=HABIT_DEG):
+    """Шесть вариантов габитуса {10-17} зерна: ось c, повёрнутая на ±14.7° вокруг каждой из трёх осей
+    ⟨11-20⟩ (стопка игл вдоль u со ступеньками в одну или другую сторону). Список (нормаль, u)."""
+    t = np.radians(tilt_deg)
+    out = []
+    for u in needle_dirs(c, a1):
+        for sg in (1.0, -1.0):
+            out.append((np.cos(t) * c + sg * np.sin(t) * np.cross(u, c), u))
+    return out
+
+
+def grow_segment(ci, nh, grains, occ, p, sub=2):
+    """Отрезок макрогидрида: часть плоскости габитуса (нормаль nh) через зародыш ci в том же зерне,
+    свободная и связная с зародышем, не дальше R_seg; толщина h. Форма — сечение зерна плоскостью.
+    Возвращает (lo — угол окна в клетках, fr — доли в окне, центр, площадь мкм²) или None."""
+    n = grains.shape[0]
+    g0 = grains[ci]
+    m = int(np.ceil((p.R_seg + p.h_um) / p.dx)) + 1
+    lo = np.array(ci) - m
+    rng_ = np.arange(-m, m + 1)
+    idx = np.ix_(*[(ci[d] + rng_) % n for d in range(3)])
+    X = rng_[:, None, None] * p.dx
+    Y = rng_[None, :, None] * p.dx
+    Z = rng_[None, None, :] * p.dx
+    q = X * nh[0] + Y * nh[1] + Z * nh[2]
+    rho2 = X * X + Y * Y + Z * Z - q * q
+    halfw = p.h_um / 2 + 0.5 * p.dx * np.abs(nh).sum()
+    cand = (np.abs(q) <= halfw) & (rho2 <= p.R_seg ** 2) & (grains[idx] == g0) & ~occ[idx]
+    lab, _ = ndimage.label(cand, structure=np.ones((3, 3, 3), bool))
+    k = lab[m, m, m]
+    if k == 0:
+        return None
+    comp = lab == k
+    off = ((np.arange(sub) + 0.5) / sub - 0.5) * p.dx
+    fr = np.zeros(q.shape)
+    for ox in off:
+        for oy in off:
+            for oz in off:
+                fr += np.abs(q + ox * nh[0] + oy * nh[1] + oz * nh[2]) <= p.h_um / 2
+    fr = fr / sub ** 3 * comp
+    tot = fr.sum()
+    if tot <= 0:
+        return None
+    cen = (np.array(ci) + 0.5) * p.dx + np.array([(fr * X).sum(), (fr * Y).sum(), (fr * Z).sum()]) / tot
+    return lo, fr, cen, tot * p.dx ** 3 / p.h_um
 
 
 def eps_star(nv):
@@ -412,6 +465,13 @@ def section_rhf(res, n_sec=16):
     zs = (np.arange(n_sec) + 0.5) / n_sec * p.size_um
     num = den = 0.0
     for q in res["plates"]:
+        if "area" in q:                                       # отрезок: Σ хорд по сечениям = площадь·sin
+            d = np.cross(q["n"], [0, 0, 1.0]); s = np.linalg.norm(d)
+            if s > 1e-6:
+                dev = np.degrees(np.arccos(min(1.0, abs(d[0]) / s)))
+                wgt = q["area"] * s * n_sec / p.size_um
+                num += wgt * simon_w(dev); den += wgt
+            continue
         u, A, B = plate_axes(q)
         for z in zs:
             tr = plate_chord(q["c"], q["n"], u, A, B, z, p.size_um)
@@ -469,7 +529,7 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
     когда оно сдвинулось больше чем на tol_mpa."""
     rng = np.random.default_rng(p.seed)
     grains, cax = make_grains3(p, rng)
-    a1 = basal_axes(cax, p) if p.shape == "needle" else None
+    a1 = basal_axes(cax, p) if p.shape in ("needle", "segment") else None
     n = grains.shape[0]
     assert n % B == 0 and win <= n
     nb = n // B
@@ -570,9 +630,41 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
             g = np.clip(g, -cap, cap)
         return float(g.mean())
 
+    def gcap_cells(t, wgt):
+        """Средняя выгода (с потолком на ближнее поле) по клеткам t с весами wgt."""
+        g = graw[t]
+        if p.cap_local_only:
+            gm = _contract([a[t] for a in e_new], st["Sm"])
+            g = np.clip(g - gm, -cap, cap) + gm
+        else:
+            g = np.clip(g, -cap, cap)
+        return float((g * wgt).sum() / wgt.sum())
+
+    def make_segment(ci, nv):
+        """Отрезок макрогидрида: из шести вариантов {10-17} зерна выбирается вариант с вероятностью
+        ∝ exp(β·ḡ), ḡ — средняя выгода по его клеткам. Несоответствие — δ в осях кристалла (nv = ось c)."""
+        opts = []
+        for nh, u in habit_normals(nv, a1[grains[ci]]):
+            sg = grow_segment(ci, nh, grains, occ, p)
+            if sg is None or sg[3] < p.S_min:
+                continue
+            lo, fr, cen, area = sg
+            nz = np.nonzero(fr)
+            t = tuple((lo[d] + nz[d]) % n for d in range(3))
+            opts.append((gcap_cells(t, fr[nz]), lo, fr, cen, area, nh, u))
+        if not opts:
+            return None
+        sc = p.beta * np.array([o[0] for o in opts])
+        pr = np.exp(sc - sc.max())
+        _, lo, fr, cen, area, nh, u = opts[rng.choice(len(opts), p=pr / pr.sum())]
+        return dict(c=cen, n=nh, cax=nv.copy(), u=u, area=float(area), R=float(np.sqrt(area / np.pi)),
+                    lo=lo, fr=fr, anchor=np.array(ci))
+
     def make_plate(ci, nv):
         """Пластинка из зародыша ci или None. Игла: из трёх ⟨11-20⟩ выбирается вариант с вероятностью
         ∝ exp(β·ḡ), ḡ — средняя выгода вдоль её длины (взаимодействие формы с полем соседей)."""
+        if p.shape == "segment":
+            return make_segment(ci, nv)
         if p.shape != "needle":
             c0, R = grow_disc(ci, nv, grains, occ, p)
             return dict(c=c0, n=nv.copy(), R=float(R)) if R >= p.R_min else None
@@ -621,10 +713,16 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
         if not ok:
             break
         c0 = q["c"]
-        o = np.floor(c0 / p.dx).astype(int) - win // 2
+        if "lo" in q:                                         # отрезок: окно вокруг зародыша
+            o = q["anchor"] - win // 2
+            fr, lo = q.pop("fr"), q.pop("lo")
+            ax = [lo[d] - o[d] + np.arange(fr.shape[d]) for d in range(3)]
+            assert all(a[0] >= 0 and a[-1] < win for a in ax)
+        else:
+            o = np.floor(c0 / p.dx).astype(int) - win // 2
+            ax, fr = plate_fraction(win, p.dx, c0 - o * p.dx, q, p.h_um)
         ix = [(o[d] + np.arange(win)) % n for d in range(3)]
         sel = np.ix_(*ix)
-        ax, fr = plate_fraction(win, p.dx, c0 - o * p.dx, q, p.h_um)
         f = np.zeros((win,) * 3, np.float32)
         f[np.ix_(*ax)] = fr
         es = eps_star(nv)
@@ -649,6 +747,11 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
         for d in range(3):
             o2 |= np.roll(oc, 1, d) | np.roll(oc, -1, d)
         occ[dsel] = o2
+        if "anchor" in q:                                     # клетки отрезка — для 3D-геометрии
+            nzm = fr > 0
+            q["cells"] = gi.reshape(fr.shape)[nzm].astype(np.int64)
+            q["cfr"] = fr[nzm].astype(np.float32)
+            del q["anchor"]
         plates.append(dict(q, c=c0 % (n * p.dx), grain=int(grains[ci])))
         if len(plates) % resync == 0:
             bsum = resync_all()
