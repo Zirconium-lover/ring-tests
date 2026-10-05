@@ -28,6 +28,7 @@
 | `sweep.py`, `run_cases.py`, `make_cases.py`, `summ.py` | переборы параметров и сводки |
 | `fig_*.py`, `make_figs.py` | рисунки в `figs/` |
 | `anim_growth.py` | анимация роста: без нагрузки и при 250 МПа (`figs/anim_growth.mp4`, `.gif`) |
+| `film/` | ролик в Manim: как работает автомат, рост, проверка, прогноз (см. `film/README.md`) |
 
 ```bash
 python -c "from ca_hydride import Params, run; r = run(Params(sigma_app=250, beta=0.12, sigma_cap=90))"
