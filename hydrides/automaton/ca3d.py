@@ -55,6 +55,12 @@ class P3:
     A_min: float = 0.5                      # меньше — зародыш не растёт
     R_seg: float = 4.0                      # отрезок {10-17}: наибольшее удаление от зародыша в плоскости, мкм
     S_min: float = 0.8                      # наименьшая площадь отрезка, мкм² (≈ диск R = 0.5)
+    gb: bool = False                        # межзёренные отрезки: на грани двух зёрен, несоответствие 7.2 % по нормали к грани
+    w_gb: float = 1.0                       # во сколько раз зарождение на грани выгоднее, чем в теле зерна (1 — так же)
+    gb_eps: str = "facet"                   # несоответствие межзёренного: "facet" — 7.2 % по нормали к грани ({111}δ ∥ границе);
+                                            # "grain" — в осях того из двух зёрен, чья ось c ближе к нормали грани (Fang)
+    cross_deg: float = 0.0                  # переход отрезка в соседнее зерно, если у того есть вариант {10-17}
+                                            # с нормалью ближе этого угла (0 — не переходит)
 
 
 def make_grains3(p, rng):
@@ -113,10 +119,11 @@ def habit_normals(c, a1, tilt_deg=HABIT_DEG):
     return out
 
 
-def grow_segment(ci, nh, grains, occ, p, sub=2):
-    """Отрезок макрогидрида: часть плоскости габитуса (нормаль nh) через зародыш ci в том же зерне,
-    свободная и связная с зародышем, не дальше R_seg; толщина h. Форма — сечение зерна плоскостью.
-    Возвращает (lo — угол окна в клетках, fr — доли в окне, центр, площадь мкм²) или None."""
+def grow_segment(ci, nh, grains, occ, p, sub=2, allowed=None, q0=0.0, cross=None):
+    """Отрезок макрогидрида: часть плоскости (нормаль nh, на расстоянии q0 от центра клетки ci) в
+    разрешённых зёрнах (по умолчанию — зерно зародыша), свободная и связная с зародышем, не дальше R_seg;
+    толщина h. Форма — сечение зерна плоскостью. cross(g) → True, если отрезок может перейти в зерно g.
+    Возвращает (lo — угол окна в клетках, fr — доли в окне, центр, площадь мкм², зёрна окна) или None."""
     n = grains.shape[0]
     g0 = grains[ci]
     m = int(np.ceil((p.R_seg + p.h_um) / p.dx)) + 1
@@ -126,10 +133,15 @@ def grow_segment(ci, nh, grains, occ, p, sub=2):
     X = rng_[:, None, None] * p.dx
     Y = rng_[None, :, None] * p.dx
     Z = rng_[None, None, :] * p.dx
-    q = X * nh[0] + Y * nh[1] + Z * nh[2]
-    rho2 = X * X + Y * Y + Z * Z - q * q
+    q = X * nh[0] + Y * nh[1] + Z * nh[2] - q0
+    rho2 = X * X + Y * Y + Z * Z - (q + q0) ** 2
     halfw = p.h_um / 2 + 0.5 * p.dx * np.abs(nh).sum()
-    cand = (np.abs(q) <= halfw) & (rho2 <= p.R_seg ** 2) & (grains[idx] == g0) & ~occ[idx]
+    gw = grains[idx]
+    slab = (np.abs(q) <= halfw) & (rho2 <= p.R_seg ** 2) & ~occ[idx]
+    ok_g = np.array([g0] if allowed is None else allowed)
+    if cross is not None:
+        ok_g = np.array([g for g in np.unique(gw[slab]) if g == g0 or cross(g)])
+    cand = slab & np.isin(gw, ok_g)
     lab, _ = ndimage.label(cand, structure=np.ones((3, 3, 3), bool))
     k = lab[m, m, m]
     if k == 0:
@@ -146,7 +158,50 @@ def grow_segment(ci, nh, grains, occ, p, sub=2):
     if tot <= 0:
         return None
     cen = (np.array(ci) + 0.5) * p.dx + np.array([(fr * X).sum(), (fr * Y).sum(), (fr * Z).sum()]) / tot
-    return lo, fr, cen, tot * p.dx ** 3 / p.h_um
+    return lo, fr, cen, tot * p.dx ** 3 / p.h_um, gw
+
+
+def grain_facets(grains, dx, min_links=4):
+    """Грани между зёрнами: пары (a < b), центр, нормаль (по главным осям точек на границе), площадь и
+    клетки по обе стороны грани (для зарождения). Учитывается периодичность."""
+    n = grains.shape[0]
+    L = n * dx
+    ng = int(grains.max()) + 1
+    keys, pts, cells, dirs = [], [], [], []
+    for d in range(3):
+        g2 = np.roll(grains, -1, axis=d)
+        i = np.nonzero(grains != g2)
+        a, b = grains[i], g2[i]
+        keys.append(np.minimum(a, b).astype(np.int64) * ng + np.maximum(a, b))
+        P = (np.stack(i, 1) + 0.5) * dx
+        P[:, d] += 0.5 * dx
+        pts.append(P % L)
+        j = list(i); j[d] = (j[d] + 1) % n
+        cells.append(np.stack([np.ravel_multi_index(i, (n,) * 3), np.ravel_multi_index(tuple(j), (n,) * 3)], 1))
+        dirs.append(np.full(len(a), d))
+    keys, pts, cells, dirs = map(np.concatenate, (keys, pts, cells, dirs))
+    o = np.argsort(keys, kind="stable")
+    keys, pts, cells, dirs = keys[o], pts[o], cells[o], dirs[o]
+    uk, start, cnt = np.unique(keys, return_index=True, return_counts=True)
+    ref = np.repeat(pts[start], cnt, axis=0)
+    dp = (pts - ref + L / 2) % L - L / 2
+    s1 = np.add.reduceat(dp, start, axis=0)
+    s2 = np.add.reduceat(dp[:, :, None] * dp[:, None, :], start, axis=0)
+    mean = s1 / cnt[:, None]
+    cov = s2 / cnt[:, None, None] - mean[:, :, None] * mean[:, None, :]
+    ev, vec = np.linalg.eigh(cov)
+    nrm = vec[:, :, 0]
+    nd = np.stack([np.add.reduceat((dirs == d).astype(float), start) for d in range(3)], 1)
+    area = dx * dx * np.sqrt((nd ** 2).sum(1))
+    keep = cnt >= min_links
+    cen = (pts[start] + mean) % L
+    ptr = np.concatenate([[0], np.cumsum(2 * cnt)])
+    allc = cells.reshape(-1)
+    sel = np.nonzero(keep)[0]
+    fc = [np.unique(allc[ptr[k]:ptr[k + 1]]) for k in sel]
+    fptr = np.concatenate([[0], np.cumsum([len(c) for c in fc])])
+    return dict(a=(uk[sel] // ng).astype(int), b=(uk[sel] % ng).astype(int), cen=cen[sel], n=nrm[sel], area=area[sel],
+                cells=np.concatenate(fc), ptr=fptr)
 
 
 def eps_star(nv):
@@ -559,6 +614,49 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
     st = dict(Sm=np.zeros(6), E0=0.0, T=np.zeros(6))      # T — сумма поля по кубу (после точного пересчёта 0)
     hcells = np.zeros(0, np.int64)                            # клетки гидрида (hyd ≥ 0.2), плоские индексы
     Sf = [a.reshape(-1) for a in S]
+    occ_f = occ.reshape(-1)
+    W2 = np.array([1.0, 1, 1, 2, 2, 2])
+    if p.shape == "segment" and p.cross_deg > 0:              # нормали {10-17} всех зёрен — для перехода через границу
+        HN = np.array([[h for h, _ in habit_normals(cax[g], a1[g])] for g in range(len(cax))])
+        cos_x = np.cos(np.radians(p.cross_deg))
+    if p.gb:                                                   # грани зёрен — места межзёренного зарождения
+        F = grain_facets(grains, p.dx)
+        nfac = len(F["a"])
+        if p.gb_eps == "grain":                               # ось c соседнего зерна, ближайшая к нормали грани
+            ca, cb = cax[F["a"]], cax[F["b"]]
+            pick_a = np.abs((ca * F["n"]).sum(1)) >= np.abs((cb * F["n"]).sum(1))
+            F_ax = np.where(pick_a[:, None], ca, cb)
+        else:
+            F_ax = F["n"]
+        F_eps = np.stack(eps_star(F_ax), 1)
+        F_gapp = p.sigma_app * (F_eps[:, 0] - e_mean_xx) / EPS_N
+        F_tree = cKDTree(F["cen"], boxsize=n * p.dx * (1 + 1e-9))
+        F_cnt = np.diff(F["ptr"])
+        wf = np.zeros(nfac)
+
+    def facet_weights(ids):
+        """Веса зарождения по клеткам граней ids (несоответствие 7.2 % по нормали к грани) × w_gb:
+        (сумма по каждой грани, клетки, веса клеток, число клеток граней)."""
+        ids = np.asarray(ids, int)
+        cnt = F_cnt[ids]
+        offs = np.repeat(F["ptr"][ids] - np.concatenate([[0], np.cumsum(cnt)[:-1]]), cnt)
+        cells = F["cells"][np.arange(cnt.sum()) + offs]
+        e = F_eps[ids][np.repeat(np.arange(len(ids)), cnt)]
+        g = sum(W2[i] * e[:, i] * Sf[i][cells] for i in range(6)) / EPS_N
+        if p.cap_local_only:
+            gm = (e @ (W2 * st["Sm"])) / EPS_N
+            g = np.clip(g - gm, -cap, cap) + gm
+        else:
+            g = np.clip(g, -cap, cap)
+        ex = p.beta * (g + np.repeat(F_gapp[ids], cnt))
+        ok = ~occ_f[cells]
+        if capture:
+            c = cH.reshape(-1)[cells]
+            ok &= c > 1e-3
+            ex = ex + np.log(np.clip(c, 1e-12, None))
+        wv = np.where(ok, np.exp(np.minimum(ex - st["E0"], 700.0)), 0.0) * p.w_gb
+        tot = np.add.reduceat(wv, np.concatenate([[0], np.cumsum(cnt)[:-1]])) if len(wv) else np.zeros(len(ids))
+        return tot, cells, wv, cnt
 
     def expo_of(sl):
         e = [a[sl] for a in e_new]
@@ -608,6 +706,8 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
         for x0 in range(0, n, 16):
             sl = np.s_[x0:x0 + 16]
             np.exp(w[sl] - mx, out=w[sl])
+        if p.gb:
+            wf[:] = facet_weights(np.arange(nfac))[0]
         return w6.sum(axis=(1, 3, 5))
 
     def update_blocks(bsum, cells):                         # прямоугольное окно: ix по осям
@@ -645,20 +745,38 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
         ∝ exp(β·ḡ), ḡ — средняя выгода по его клеткам. Несоответствие — δ в осях кристалла (nv = ось c)."""
         opts = []
         for nh, u in habit_normals(nv, a1[grains[ci]]):
-            sg = grow_segment(ci, nh, grains, occ, p)
+            cross = (lambda g, nh=nh: np.abs(HN[g] @ nh).max() >= cos_x) if p.cross_deg > 0 else None
+            sg = grow_segment(ci, nh, grains, occ, p, cross=cross)
             if sg is None or sg[3] < p.S_min:
                 continue
-            lo, fr, cen, area = sg
+            lo, fr, cen, area, gw = sg
             nz = np.nonzero(fr)
             t = tuple((lo[d] + nz[d]) % n for d in range(3))
-            opts.append((gcap_cells(t, fr[nz]), lo, fr, cen, area, nh, u))
+            opts.append((gcap_cells(t, fr[nz]), lo, fr, cen, area, nh, u, gw))
         if not opts:
             return None
         sc = p.beta * np.array([o[0] for o in opts])
         pr = np.exp(sc - sc.max())
-        _, lo, fr, cen, area, nh, u = opts[rng.choice(len(opts), p=pr / pr.sum())]
+        _, lo, fr, cen, area, nh, u, gw = opts[rng.choice(len(opts), p=pr / pr.sum())]
+        gs_ = np.unique(gw[fr > 0])
+        parts = [(fr * (gw == g), eps_star(cax[g])) for g in gs_]   # несоответствие — в осях кристалла каждого зерна
         return dict(c=cen, n=nh, cax=nv.copy(), u=u, area=float(area), R=float(np.sqrt(area / np.pi)),
-                    lo=lo, fr=fr, anchor=np.array(ci))
+                    lo=lo, fr=fr, anchor=np.array(ci), parts=parts, ngr=int(len(gs_)))
+
+    def make_gb(kf, ci):
+        """Межзёренный отрезок на грани kf через клетку ci: плоскость грани, оба зерна; несоответствие —
+        по p.gb_eps (по нормали к грани или в осях соседнего зерна)."""
+        nf = F["n"][kf]
+        L_ = n * p.dx
+        dc = (F["cen"][kf] - (np.array(ci) + 0.5) * p.dx + L_ / 2) % L_ - L_ / 2
+        sg = grow_segment(ci, nf, grains, occ, p, allowed=[F["a"][kf], F["b"][kf]], q0=float(dc @ nf))
+        if sg is None or sg[3] < p.S_min:
+            return None
+        lo, fr, cen, area, _ = sg
+        uu = np.cross(nf, [0, 0, 1.0] if abs(nf[2]) < 0.9 else [1.0, 0, 0])
+        return dict(c=cen, n=nf.copy(), cax=F_ax[kf].copy(), u=uu / np.linalg.norm(uu), area=float(area), R=float(np.sqrt(area / np.pi)),
+                    lo=lo, fr=fr, anchor=np.array(ci), parts=[(fr, eps_star(F_ax[kf]))], gb=True,
+                    pair=(int(F["a"][kf]), int(F["b"][kf])), ngr=2)
 
     def make_plate(ci, nv):
         """Пластинка из зародыша ci или None. Игла: из трёх ⟨11-20⟩ выбирается вариант с вероятностью
@@ -688,11 +806,33 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
     while total < target:
         ok = False
         tried = []
+        tried_f = []
         for _ in range(40):
             cdf = np.cumsum(np.clip(bsum, 0, None).ravel())
-            if cdf[-1] <= 0:
+            Wg = float(wf.sum()) if p.gb else 0.0
+            if cdf[-1] + Wg <= 0:
                 break
+            if Wg > 0:
+                cdf_f = np.cumsum(wf)
             for bk in np.searchsorted(cdf, rng.random(64) * cdf[-1]):
+                if Wg > 0 and rng.random() * (cdf[-1] + Wg) < Wg:     # межзёренное зарождение
+                    kf = int(min(np.searchsorted(cdf_f, rng.random() * cdf_f[-1]), nfac - 1))
+                    _, fcells, fwv, _ = facet_weights([kf])
+                    if fwv.sum() <= 0:
+                        wf[kf] = 0.0
+                        continue
+                    cell = fcells[min(np.searchsorted(np.cumsum(fwv), rng.random() * fwv.sum()), len(fwv) - 1)]
+                    ci = np.unravel_index(cell, (n,) * 3)
+                    nv = cax[grains[ci]]
+                    q = make_gb(kf, ci)
+                    if q is not None:
+                        ok = True
+                        break
+                    wf[kf] = 0.0
+                    tried_f.append(kf)
+                    continue
+                if cdf[-1] <= 0:
+                    continue
                 bi, bj, bl = np.unravel_index(min(bk, nb ** 3 - 1), (nb, nb, nb))
                 wb = w6[bi, :, bj, :, bl, :]
                 cs = np.cumsum(wb.ravel())
@@ -723,13 +863,14 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
             ax, fr = plate_fraction(win, p.dx, c0 - o * p.dx, q, p.h_um)
         ix = [(o[d] + np.arange(win)) % n for d in range(3)]
         sel = np.ix_(*ix)
-        f = np.zeros((win,) * 3, np.float32)
-        f[np.ix_(*ax)] = fr
-        es = eps_star(nv)
-        corr = float(fr.sum()) / win ** 3 * (Mw @ np.array(es))
-        for i, a in enumerate(el.stress_of(sfft.rfftn(f), es, single=True)):
-            S[i][sel] += a + np.float32(corr[i])
-        st["T"] = st["T"] + corr * win ** 3
+        parts = q.pop("parts", None) or [(fr, eps_star(q.get("cax", nv)))]
+        for frp, es in parts:
+            f = np.zeros((win,) * 3, np.float32)
+            f[np.ix_(*ax)] = frp
+            corr = float(frp.sum()) / win ** 3 * (Mw @ np.array(es))
+            for i, a in enumerate(el.stress_of(sfft.rfftn(f), es, single=True)):
+                S[i][sel] += a + np.float32(corr[i])
+            st["T"] = st["T"] + corr * win ** 3
         graw[sel] = _contract([a[sel] for a in e_new], [a[sel] for a in S])
         dsel = np.ix_(*[(o[d] + ax[d]) % n for d in range(3)])
         was = hyd[dsel] >= 0.2
@@ -740,8 +881,9 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
         total += float(new.sum())
         if capture:
             pend[dsel] += fr.astype(np.float32)
-        for i in range(6):
-            Eacc[i][dsel] += (fr * es[i]).astype(np.float32)
+        for frp, es in parts:
+            for i in range(6):
+                Eacc[i][dsel] += (frp * es[i]).astype(np.float32)
         oc = occ[dsel] | (fr > 0.2)
         o2 = oc.copy()
         for d in range(3):
@@ -760,6 +902,11 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
         else:
             w[sel] = weights(sel)
             update_blocks(bsum, ix)
+            if p.gb:
+                near = np.array(F_tree.query_ball_point(c0 % (n * p.dx), r=0.9 * win * p.dx) + tried_f, int)
+                if near.size:
+                    near = np.unique(near)
+                    wf[near] = facet_weights(near)[0]
             if tried:
                 t = tuple(np.array(tried).T)
                 w[t] = weights(t)

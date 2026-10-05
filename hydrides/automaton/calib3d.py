@@ -30,13 +30,20 @@ def job(kw):
     c = np.array([q["c"] for q in pl]); nv = np.array([q["n"] for q in pl])
     R = np.array([q["R"] for q in pl])
     ext = {k: np.array([q[k] for q in pl]) for k in ("u", "A", "B", "area", "cax") if pl and k in pl[0]}
+    if pl and "area" in pl[0]:                              # межзёренный ли отрезок и через сколько зёрен прошёл
+        ext["gb"] = np.array([bool(q.get("gb", False)) for q in pl]); ext["ngr"] = np.array([q.get("ngr", 1) for q in pl])
     if pl and "cells" in pl[0]:                             # отрезки {10-17}: клетки для 3D-геометрии
         ext["cells"] = np.concatenate([q["cells"] for q in pl]); ext["cfr"] = np.concatenate([q["cfr"] for q in pl])
         ext["cptr"] = np.cumsum([0] + [len(q["cells"]) for q in pl])
     np.savez_compressed(fn + ".npz", c=c, n=nv, R=R, **ext)
     img, se = rhf_voxel(r["hyd"], r["params"].dx, se=True)       # срез поля гидрида, как image_rhf в 2D
     ps = packet_stats(dict(c=c, n=nv, R=R, **ext), kw["size_um"], r["params"].dx)
-    m = dict(kw, **ps, RHF_trace=section_rhf(r), RHF_image=img, RHF_image_se=se, img_nsec=32, img_method="voxel", n_plates=len(R),
+    if "gb" in ext:
+        wa = ext["area"]
+        m_gb = dict(gb_frac=float(wa[ext["gb"]].sum() / wa.sum()), cross_frac=float(wa[(ext["ngr"] > 1) & ~ext["gb"]].sum() / wa.sum()))
+    else:
+        m_gb = {}
+    m = dict(kw, **ps, **m_gb, RHF_trace=section_rhf(r), RHF_image=img, RHF_image_se=se, img_nsec=32, img_method="voxel", n_plates=len(R),
              R_mean=float(R.mean()), time_s=time.time() - t0)
     json.dump(m, open(fn + ".json", "w"), default=float)
     print(name, f"след {m['RHF_trace']:.2f} пакеты {m['packet_RHF']:.2f} ({m['n_packets']}) изобр. {m['RHF_image']:.2f} {m['time_s']:.0f} с", flush=True)
