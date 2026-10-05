@@ -109,7 +109,7 @@ class S02_Misfit(Scene):
 # --------------------------------------------------------------------------- 3. выгода зарождения
 class S03_Favour(Scene):
     def construct(self):
-        head = title_block("Где выгодно зародиться следующей", "Выгода --- работа поля над расширением новой пластинки")
+        head = title_block("Где выгоднее зародиться новой пластинке", "Выгода --- работа поля над расширением новой пластинки")
         self.play(Write(head[0]), FadeIn(head[1]), run_time=1.4)
         W = 5.0; c = np.array([-3.5, -0.75, 0])
         p = panel(W, W, c)
@@ -306,18 +306,18 @@ class S06_Rule45(Scene):
     def construct(self):
         head = title_block(r"Правило $45^\circ$", r"Куда растёт цепочка из пластинок с наклоном $\pm\psi$")
         self.play(Write(head[0]), FadeIn(head[1]), run_time=1.4)
-        pA = panel(6.0, 1.75, np.array([-3.55, 1.0, 0])); pB = panel(6.0, 2.75, np.array([-3.55, -1.5, 0]))
+        pA = panel(6.0, 1.75, np.array([-3.55, 1.15, 0])); pB = panel(6.0, 2.75, np.array([-3.55, -1.3, 0]))
         self.play(FadeIn(pA), FadeIn(pB), run_time=0.5)
-        zA = zigzag(25, 8, 0.6, [-6.15, 0.85, 0], CYAN_H, vertical=False)
-        zB = zigzag(65, 7, 0.36, [-5.9, -2.65, 0], RED_H, vertical=True)
+        zA = zigzag(25, 8, 0.6, [-6.15, 1.0, 0], CYAN_H, vertical=False)
+        zB = zigzag(65, 7, 0.36, [-5.9, -2.45, 0], RED_H, vertical=True)
         lA = TL(r"$\pm 25^\circ$: цепочка \textcolor[HTML]{00AFD6}{вдоль дуги}", 24).next_to(pA.get_corner(UL), DR, buff=0.12)
-        lB = TL(r"$\pm 65^\circ$: цепочка \textcolor[HTML]{FF462D}{по радиусу} \\ --- «колода карт»", 24).move_to([-4.6, -1.5, 0], aligned_edge=LEFT)
+        lB = TL(r"$\pm 65^\circ$: цепочка \textcolor[HTML]{FF462D}{по радиусу} \\ --- «колода карт»", 24).move_to([-4.6, -1.3, 0], aligned_edge=LEFT)
         self.play(FadeIn(lA), run_time=0.4)
         self.play(LaggedStart(*[GrowFromCenter(x) for x in zA], lag_ratio=0.35), run_time=2.2)
         self.play(FadeIn(lB), run_time=0.4)
         self.play(LaggedStart(*[GrowFromCenter(x) for x in zB], lag_ratio=0.35), run_time=2.2)
         data = np.loadtxt(os.path.join(DATA, "switch_curve.csv"), delimiter=",", skiprows=1)
-        ax = axes([0, 90, 15], [0, 90, 15], 5.2, 3.7, [3.75, -0.35, 0], xn=[0, 15, 30, 45, 60, 75, 90], yn=[0, 45, 90])
+        ax = axes([0, 90, 15], [0, 90, 15], 5.2, 3.5, [3.75, -0.15, 0], xn=[0, 15, 30, 45, 60, 75, 90], yn=[0, 45, 90])
         xl = T(r"наклон пластинок $\psi$, $^\circ$", 22, color=SUB).next_to(ax.x_axis, DOWN, buff=0.42)
         yl = T(r"направление цепочки, $^\circ$ от дуги", 22, color=SUB).next_to(ax.y_axis, UP, buff=0.1).align_to(ax, LEFT)
         self.play(Create(ax), FadeIn(xl), FadeIn(yl), run_time=1.2)
@@ -331,8 +331,8 @@ class S06_Rule45(Scene):
         dot = always_redraw(lambda: Dot(ax.c2p(tr.get_value(), np.interp(tr.get_value(), data[:, 0], data[:, 1])), color=YELLOW_H, radius=0.09))
         self.add(dot)
         self.play(tr.animate.set_value(85), run_time=3.0, rate_func=there_and_back_with_pause)
-        txt = T(r"При $45^\circ$ соседи противоположного наклона почти не взаимодействуют, и направление цепочки "
-                r"\textcolor[HTML]{F5C518}{переключается}. \\ Один механизм --- и окружные пакеты, и «колода карт»", 25).to_edge(DOWN, buff=0.12)
+        txt = VGroup(T1(r"При $45^\circ$ соседи противоположного наклона почти не взаимодействуют, и направление цепочки \textcolor[HTML]{F5C518}{переключается}.", 24),
+                     T1(r"Один механизм --- и окружные пакеты, и «колода карт»", 24)).arrange(DOWN, buff=0.12).to_edge(DOWN, buff=0.25)
         self.play(FadeIn(txt), run_time=1.0)
         self.wait(2.5)
         fade_all(self)
@@ -644,13 +644,13 @@ class S08b_Series(Scene):
         bars = VGroup()
         for (pl, P, num), x in zip(groups, xs):
             r = rhf_of(P)
-            base = np.array([x - W / 2, -3.05, 0])
+            base = np.array([x - W / 2, -2.45, 0])
             bg = Rectangle(width=W, height=0.16, fill_color=PANEL, fill_opacity=1, stroke_color=BORDER, stroke_width=1.5).move_to(base + np.array([W / 2, 0, 0]))
             fg = Rectangle(width=max(W * r, 0.01), height=0.16, fill_color=RED_H, fill_opacity=1, stroke_width=0).align_to(bg, LEFT).move_to(bg, coor_mask=[0, 1, 0])
             bars.add(bg, fg)
         self.play(FadeIn(bars), run_time=0.8)
-        txt = T(r"Окружные пакеты сменяются радиальными уже между \textcolor[HTML]{F5C518}{100 и 150 МПа}; "
-                r"в опыте переход резче и около 155 МПа", 25).to_edge(DOWN, buff=0.12)
+        txt = VGroup(T1(r"Окружные пакеты сменяются радиальными уже между \textcolor[HTML]{F5C518}{100 и 150 МПа}", 25),
+                     T1(r"В опыте переход резче, около 155 МПа", 24, color=SUB)).arrange(DOWN, buff=0.12).to_edge(DOWN, buff=0.3)
         self.play(FadeIn(txt), run_time=0.8)
         self.wait(3.0)
         fade_all(self)
