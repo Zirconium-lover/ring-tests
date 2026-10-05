@@ -24,10 +24,13 @@ if KIN:
 
 
 def cases():
+    only = os.environ.get("TRENDS_ONLY", "")             # например "H" — только серия по водороду
     L = []
     for H, s, seed, mode in itertools.product([60, 100, 180, 300, 450], SIG, [1, 2], list(MODES)):
         Tmax = float(T_line(H, TSS["E635"]["TSSD"])) + 15
         L.append(dict(name=f"H{H}_s{s}_{mode}_seed{seed}", H=H, Tmax=round(Tmax, 1), s=s, seed=seed, mode=mode))
+    if only == "H":
+        return [c for c in L if c["mode"] == list(MODES)[0]]
     for Tmax, s, seed in itertools.product([350, 370, 390, 420], [0, 100, 150, 200, 250], [1, 2]):
         L.append(dict(name=f"Tmax{Tmax}_s{s}_seed{seed}", H=180, Tmax=Tmax, s=s, seed=seed, mode=list(MODES)[0]))
     if KIN:

@@ -78,7 +78,7 @@ class Model:
     cap_mode: str = "const"                 # "const" | "sy"
     T_ref: float = 300.0                    # °C — средняя температура выпадения в калибровке
     cal_material: str = "Zry4_SR"           # материал калибровки (для cap_mode = "sy")
-    cap_local_only: bool = False            # потолок только на ближнее поле; среднее напряжение в металле — без потолка
+    cap_local_only: bool = True             # потолок только на ближнее поле; среднее напряжение в металле — без потолка
 
 
 def _plates_arr(plates):
