@@ -1,5 +1,5 @@
 """Проверка инструмента на общие закономерности (не на один опыт).
-python trends.py папка [процессов] [kin B Delta0]   (без kin — последовательный движок)
+python trends.py папка [процессов] [kin B Delta0 потолок]   (без kin — последовательный движок)
   H     — порог переориентации от водорода (полное растворение: T_max = TSSD(H) + 15 °C);
           ориентир — Desquines et al., JNM 453 (2014): σ_th = 110 + 65·(1 − e^(−H/65)) МПа (Zry-4)
   Tmax  — неполное растворение: при T_max ниже TSSD часть окружных гидридов остаётся
@@ -19,7 +19,8 @@ KIN = len(sys.argv) > 3 and sys.argv[3] == "kin"
 SIG = [0, 50, 100, 150, 200, 250]
 MODES = {"const": Model(), "T": Model(beta_mode="1/T", cap_mode="sy")}
 if KIN:
-    MODES = {"kin": Model(engine="kin", B=float(sys.argv[4]), Delta0=float(sys.argv[5]))}
+    MODES = {"kin": Model(engine="kin", B=float(sys.argv[4]), Delta0=float(sys.argv[5]),
+                          sigma_cap=float(sys.argv[6]) if len(sys.argv) > 6 else 90.0)}
 
 
 def cases():
