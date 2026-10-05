@@ -1,6 +1,6 @@
 """Карта притяжения в 3D: где поле пластинки-диска выгодно для следующей пластинки.
 Для сравнения — та же пластинка в 2D (бесконечная вдоль оси трубы, плоская деформация).
-python map3d.py; python map3d.py shapes  → числа в stdout и figs/map3d_numbers.json; рисунок — fig_map3d.py"""
+python map3d.py; python map3d.py shapes; python map3d.py needles  → числа в stdout и figs/map3d_numbers.json; рисунок — fig_map3d.py"""
 import os
 import json
 import numpy as np
@@ -104,6 +104,40 @@ def stats(g, f, plane_only=False):
     return out
 
 
+def needle_field(nv, u, A, B):
+    """Игла (эллипс A × B в базисной плоскости, длинная ось u) с центром C0 — доля по клеткам куба."""
+    from ca3d import ellipse_fraction
+    ax, fr = ellipse_fraction(N, DX, C0, nv, u, A, B, H)
+    f = np.zeros((N,) * 3)
+    f[np.ix_(*ax)] = fr
+    return f
+
+
+def needle_axis(nv, phi_deg):
+    """Ось ⟨11-20⟩ в базисной плоскости под φ к проекции оси трубы."""
+    ref = np.array([0, 0, 1.0]) - nv[2] * nv
+    ref /= np.linalg.norm(ref)
+    w = np.cross(nv, ref)
+    f = np.radians(phi_deg)
+    return np.cos(f) * ref + np.sin(f) * w
+
+
+def run_needles(A=2.5, B=0.5):
+    """Иглы 5 × 1 мкм под φ = 0° (вдоль оси трубы), 30° (CWSR) и 90° (в плоскости r–θ) к оси трубы."""
+    res = {}
+    for psi in (20, 48, 70):
+        n1 = normal(psi)
+        for phi in (0, 30, 90):
+            f = needle_field(n1, needle_axis(n1, phi), A, B)
+            for lab, n2 in (("parallel", n1), ("mirror", normal(-psi))):
+                g = gain(f, n1, n2)
+                st = stats(g, f)
+                st["g_max"] = float(np.max(np.where(free_mask(f), g, -1e9)))
+                res[f"needle_psi{psi}_phi{phi}_{lab}"] = st
+                print("игла", psi, phi, lab, {k: round(v, 2) for k, v in st.items()}, flush=True)
+    return res
+
+
 def run_shapes():
     """Вытянутые вдоль оси трубы пластинки (лента): полуось вдоль следа 1.25 мкм, вдоль оси 1.25…5 мкм."""
     res = {}
@@ -122,10 +156,10 @@ def run_shapes():
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "shapes":
+    if len(sys.argv) > 1 and sys.argv[1] in ("shapes", "needles"):
         fn = os.path.join(HERE, "figs", "map3d_numbers.json")
         res = json.load(open(fn)) if os.path.exists(fn) else {}
-        res.update(run_shapes())
+        res.update(run_shapes() if sys.argv[1] == "shapes" else run_needles())
         json.dump(res, open(fn, "w"), indent=1)
         sys.exit()
     res = {}

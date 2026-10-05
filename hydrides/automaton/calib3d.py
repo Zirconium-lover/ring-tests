@@ -26,8 +26,9 @@ def job(kw):
     r = run3d_fast(P3(**kw))
     c = np.array([q["c"] for q in r["plates"]]); nv = np.array([q["n"] for q in r["plates"]])
     R = np.array([q["R"] for q in r["plates"]])
-    np.savez_compressed(fn + ".npz", c=c, n=nv, R=R)
-    img, se = rhf_sections(c, nv, R, kw["size_um"], se=True)
+    ell = {k: np.array([q[k] for q in r["plates"]]) for k in ("u", "A", "B")} if r["plates"] and "u" in r["plates"][0] else {}
+    np.savez_compressed(fn + ".npz", c=c, n=nv, R=R, **ell)
+    img, se = rhf_sections(c, nv, R, kw["size_um"], se=True, **ell)
     m = dict(kw, RHF_trace=section_rhf(r), RHF_image=img, RHF_image_se=se, img_nsec=32, n_plates=len(R),
              R_mean=float(R.mean()), time_s=time.time() - t0)
     json.dump(m, open(fn + ".json", "w"), default=float)
@@ -39,7 +40,8 @@ def reimage(fn):
     if m.get("img_nsec") == 32:
         return
     z = np.load(fn[:-5] + ".npz")
-    m["RHF_image"], m["RHF_image_se"] = rhf_sections(z["c"], z["n"], z["R"], m["size_um"], se=True)
+    ell = {k: z[k] for k in ("u", "A", "B") if k in z}
+    m["RHF_image"], m["RHF_image_se"] = rhf_sections(z["c"], z["n"], z["R"], m["size_um"], se=True, **ell)
     m["img_nsec"] = 32
     json.dump(m, open(fn, "w"), default=float)
 

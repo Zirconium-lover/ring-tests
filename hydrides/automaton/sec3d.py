@@ -14,21 +14,20 @@ from gaps import render_plates  # noqa: E402
 FIELD_UM = 144.0          # периодическое сечение размножается до поля не меньше этого
 
 
-def section_plates(c, nv, R, zc, L):
-    """Следы дисков в сечении z = zc: (ND, TD, ψ, полудлина) в координатах автомата (строки вниз)."""
+def section_plates(c, nv, R, zc, L, u=None, A=None, B=None):
+    """Следы пластинок в сечении z = zc: (ND, TD, ψ, полудлина) в координатах автомата (строки вниз).
+    Диски — c, nv, R; эллипсы (иглы вдоль ⟨11-20⟩) — ещё u, A, B."""
+    from ca3d import plate_chord, plate_axes
     out = []
-    for ci, ni, ri in zip(c, nv, R):
-        sin_t = np.sqrt(max(1e-12, 1 - ni[2] ** 2))
-        dz = (zc - ci[2] + L / 2) % L - L / 2
-        rr = abs(dz) / sin_t
-        if rr >= ri:
+    for k in range(len(c)):
+        q = dict(n=nv[k], R=R[k]) if u is None else dict(n=nv[k], u=u[k], A=A[k], B=B[k])
+        uu, aa, bb = plate_axes(q)
+        tr = plate_chord(c[k], nv[k], uu, aa, bb, zc, L)
+        if tr is None:
             continue
-        half = np.sqrt(ri * ri - rr * rr)
-        d = np.cross(ni, [0, 0, 1.0]); d /= np.linalg.norm(d)
-        w = np.array([0, 0, 1.0]) - ni[2] * ni; w /= max(np.linalg.norm(w), 1e-9)
-        p0 = ci + w * (dz / max(w[2], 1e-9))
+        (x, y), d, half = tr
         psi = np.arctan2(-d[1], d[0])                       # строки вниз: угол следа от TD «вверх»
-        out.append((p0[1] % L, p0[0] % L, psi, half))
+        out.append((y % L, x % L, psi, half))
     return np.array(out) if out else np.zeros((0, 4))
 
 
@@ -44,9 +43,9 @@ def rhf_image(P, L, tile=None):
     return r["scales"][0]["RHF_simon"] if r["scales"] else np.nan
 
 
-def rhf_sections(c, nv, R, L, n_sec=32, se=False):
+def rhf_sections(c, nv, R, L, n_sec=32, se=False, u=None, A=None, B=None):
     """Среднее RHF по изображениям n_sec равноотстоящих сечений (по одному сечению разброс ±0.15–0.25:
     следы дисков короче 2 мкм, поэтому сечений нужно много). se=True — ещё и стандартная ошибка."""
-    v = np.array([rhf_image(section_plates(c, nv, R, zc, L), L) for zc in (np.arange(n_sec) + 0.5) * L / n_sec])
+    v = np.array([rhf_image(section_plates(c, nv, R, zc, L, u, A, B), L) for zc in (np.arange(n_sec) + 0.5) * L / n_sec])
     m = float(np.nanmean(v))
     return (m, float(np.nanstd(v) / np.sqrt(np.isfinite(v).sum()))) if se else m

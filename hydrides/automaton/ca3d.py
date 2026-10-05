@@ -41,6 +41,14 @@ class P3:
     E: float = 90e3
     nu: float = 0.34
     seed: int = 1
+    # кристаллография микрогидрида (shape="needle"): вытянутая пластинка в базисной плоскости,
+    # длинная ось вдоль одного из трёх ⟨11-20⟩ зерна (Carpenter; Perovic; Patel 2021)
+    shape: str = "disc"                     # "disc" — круглый диск (пилот); "needle" — пластинка вдоль ⟨11-20⟩
+    prism: str = "10-10"                    # призматическая текстура: ⟨10-10⟩ ∥ оси трубы (CWSR), "11-20" (RX), "random"
+    prism_s: float = 10.0                   # разброс поворота вокруг оси c, град
+    A_max: float = 3.0                      # наибольшая полудлина вдоль ⟨11-20⟩, мкм (длина до 6 мкм, как в 2D)
+    B_max: float = 0.5                      # наибольшая полуширина поперёк, мкм
+    A_min: float = 0.5                      # меньше — зародыш не растёт
 
 
 def make_grains3(p, rng):
@@ -62,6 +70,30 @@ def make_grains3(p, rng):
     gam = np.radians(rng.normal(0, p.chi_sL, ng)) if p.chi_sL > 0 else np.zeros(ng)
     c = np.stack([np.sin(alpha) * np.cos(gam), np.cos(alpha) * np.cos(gam), np.sin(gam)], 1)   # (x=TD, y=ND, z=L)
     return grains, c
+
+
+def basal_axes(c, p):
+    """Направление a1 = ⟨11-20⟩ в базисной плоскости каждого зерна. Отсчёт — от проекции оси трубы
+    на базисную плоскость: при ⟨10-10⟩ ∥ оси (CWSR) ⟨11-20⟩ повёрнуты на 30°, 90°, 150°; при ⟨11-20⟩ ∥ оси
+    (RX) — на 0°, 60°, 120°. Свой генератор случайных чисел, чтобы не менять зёрна дисковых прогонов."""
+    rng = np.random.default_rng(p.seed + 7919)
+    ng = len(c)
+    ref = np.array([0, 0, 1.0])[None] - c[:, 2:3] * c
+    bad = np.linalg.norm(ref, axis=1) < 1e-6
+    ref[bad] = np.array([1.0, 0, 0])[None] - c[bad, 0:1] * c[bad]
+    ref /= np.linalg.norm(ref, axis=1)[:, None]
+    w = np.cross(c, ref)
+    if p.prism == "random":
+        phi = rng.uniform(0, np.pi / 3, ng)
+    else:
+        phi = np.radians((30.0 if p.prism == "10-10" else 0.0) + rng.normal(0, p.prism_s, ng))
+    return np.cos(phi)[:, None] * ref + np.sin(phi)[:, None] * w
+
+
+def needle_dirs(c, a1):
+    """Три оси ⟨11-20⟩ зерна (через 120° в базисной плоскости)."""
+    w = np.cross(c, a1)
+    return [np.cos(t) * a1 + np.sin(t) * w for t in np.radians((0.0, 120.0, 240.0))]
 
 
 def eps_star(nv):
@@ -157,6 +189,95 @@ def disc_fraction(n, dx, c0, nv, R, h, sub=2):
     return [a % n for a in ax], fr
 
 
+def ellipse_fraction(n, dx, c0, nv, u, A, B, h, sub=2):
+    """Доля пластинки-эллипса (центр c0, нормаль nv, длинная ось u, полуоси A вдоль u и B поперёк, толщина h)."""
+    w = np.cross(nv, u)
+    r = max(A, B) + h
+    lo = np.floor((c0 - r) / dx).astype(int) - 1
+    hi = np.floor((c0 + r) / dx).astype(int) + 2
+    ax = [np.arange(lo[i], hi[i]) for i in range(3)]
+    off = (np.arange(sub) + 0.5) / sub
+    X = (ax[0][:, None, None, None, None, None] + off[None, None, None, :, None, None]) * dx - c0[0]
+    Y = (ax[1][None, :, None, None, None, None] + off[None, None, None, None, :, None]) * dx - c0[1]
+    Z = (ax[2][None, None, :, None, None, None] + off[None, None, None, None, None, :]) * dx - c0[2]
+    q = X * nv[0] + Y * nv[1] + Z * nv[2]
+    s = X * u[0] + Y * u[1] + Z * u[2]
+    t = X * w[0] + Y * w[1] + Z * w[2]
+    fr = ((np.abs(q) <= h / 2) & ((s / A) ** 2 + (t / B) ** 2 <= 1)).mean(axis=(3, 4, 5))
+    return [a % n for a in ax], fr
+
+
+def plate_fraction(n, dx, c0, q, h):
+    """Доля пластинки q (диск или эллипс) в клетках вокруг центра c0."""
+    if "u" in q:
+        return ellipse_fraction(n, dx, c0, q["n"], q["u"], q["A"], q["B"], h)
+    return disc_fraction(n, dx, c0, q["n"], q["R"], h)
+
+
+def grow_needle(ci, nv, u, grains, occ, p):
+    """Пластинка растёт вдоль ⟨11-20⟩ (u) в обе стороны, пока то же зерно и свободно (как в 2D), затем
+    в ширину поперёк (w = n × u) до B_max. Возвращает (центр, A, B)."""
+    n = grains.shape[0]
+    g0 = grains[ci]
+    nuc = (np.array(ci) + 0.5) * p.dx
+    w = np.cross(nv, u)
+    step = p.dx * 0.5
+
+    def free(pts):
+        i = np.floor(pts / p.dx).astype(int) % n
+        return bool(np.all((grains[i[..., 0], i[..., 1], i[..., 2]] == g0) & ~occ[i[..., 0], i[..., 1], i[..., 2]]))
+
+    def reach(c, e, lim, side_pts):
+        d = 0.0
+        while d + step <= lim and free(c[None] + side_pts + (d + step) * e[None]):
+            d += step
+        return d
+
+    zero = np.zeros((1, 3))
+    a, b = reach(nuc, u, p.A_max, zero), reach(nuc, -u, p.A_max, zero)
+    A = 0.5 * (a + b)
+    c0 = nuc + 0.5 * (a - b) * u
+    side = np.array([-0.5 * A, 0.0, 0.5 * A])[:, None] * u[None]       # ширину проверяем по трём линиям
+    a, b = reach(c0, w, p.B_max, side), reach(c0, -w, p.B_max, side)
+    B = max(0.5 * (a + b), 0.25)
+    c0 = c0 + 0.5 * (a - b) * w
+    return c0, A, B
+
+
+def plate_chord(c, nv, u, A, B, zc, L):
+    """След пластинки (эллипс A × B по осям u, n × u; диск — A = B = R) в сечении z = zc периодического куба L:
+    (середина следа (x, y), направление следа d, полудлина) или None."""
+    d = np.cross(nv, [0, 0, 1.0])
+    nd = np.linalg.norm(d)
+    if nd < 1e-6:
+        return None
+    d = d / nd
+    dz = (zc - c[2] + L / 2) % L - L / 2
+    wv = np.array([0, 0, 1.0]) - nv[2] * nv
+    wv /= np.linalg.norm(wv)
+    p0 = wv * (dz / wv[2])                                    # относительно центра пластинки
+    w = np.cross(nv, u)
+    s0, su, r0, rw = p0 @ u, d @ u, p0 @ w, d @ w
+    qa = su * su / (A * A) + rw * rw / (B * B)
+    qb = 2 * (s0 * su / (A * A) + r0 * rw / (B * B))
+    qc = s0 * s0 / (A * A) + r0 * r0 / (B * B) - 1
+    disc = qb * qb - 4 * qa * qc
+    if disc <= 0:
+        return None
+    tm, half = -qb / (2 * qa), np.sqrt(disc) / (2 * qa)
+    mid = c + p0 + tm * d
+    return mid[:2], d, half
+
+
+def plate_axes(q):
+    """(u, A, B) пластинки: у диска u — любое направление в его плоскости, A = B = R."""
+    if "u" in q:
+        return q["u"], q["A"], q["B"]
+    nv = q["n"]
+    u = np.cross(nv, [0, 0, 1.0] if abs(nv[2]) < 0.9 else [1.0, 0, 0])
+    return u / np.linalg.norm(u), q["R"], q["R"]
+
+
 def grow_disc(ci, nv, grains, occ, p):
     """Диск растёт в своей плоскости; упираясь краем в границу зерна или соседа, сдвигает центр
     от препятствия (как пластинка в 2D растёт в обе стороны), пока зародыш внутри диска."""
@@ -247,8 +368,8 @@ def run3d(p: P3, verbose=False):
                     continue
                 ci = np.unravel_index(k, (n, n, n))
                 nv = cax[grains[ci]]
-                c0, R = grow_disc(ci, nv, grains, occ, p)
-                if R >= p.R_min:
+                q = make_plate(ci, nv)
+                if q is not None:
                     ok = True
                     break
                 w[k] = 0.0
@@ -291,19 +412,12 @@ def section_rhf(res, n_sec=16):
     zs = (np.arange(n_sec) + 0.5) / n_sec * p.size_um
     num = den = 0.0
     for q in res["plates"]:
-        nv, c0, R = q["n"], q["c"], q["R"]
-        d = np.cross(nv, [0, 0, 1.0])                         # след плоскости пластинки в сечении z = const
-        if np.linalg.norm(d) < 1e-6:
-            continue                                          # пластинка параллельна сечению
-        d /= np.linalg.norm(d)
-        dev = np.degrees(np.arccos(min(1.0, abs(d[0]))))       # угол следа к TD
-        sin_t = np.sqrt(max(1e-12, 1 - nv[2] ** 2))            # наклон плоскости к оси z
+        u, A, B = plate_axes(q)
         for z in zs:
-            dz = (z - c0[2] + p.size_um / 2) % p.size_um - p.size_um / 2
-            rr = abs(dz) / sin_t                                # расстояние от центра диска до линии сечения в его плоскости
-            if rr < R:
-                L = 2 * np.sqrt(R * R - rr * rr)
-                num += L * simon_w(dev); den += L
+            tr = plate_chord(q["c"], q["n"], u, A, B, z, p.size_um)
+            if tr is not None:
+                dev = np.degrees(np.arccos(min(1.0, abs(tr[1][0]))))   # угол следа к TD
+                num += 2 * tr[2] * simon_w(dev); den += 2 * tr[2]
     return num / den if den else np.nan
 
 
@@ -355,6 +469,7 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
     когда оно сдвинулось больше чем на tol_mpa."""
     rng = np.random.default_rng(p.seed)
     grains, cax = make_grains3(p, rng)
+    a1 = basal_axes(cax, p) if p.shape == "needle" else None
     n = grains.shape[0]
     assert n % B == 0 and win <= n
     nb = n // B
@@ -443,6 +558,37 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
         nm = n ** 3 - hcells.size
         return np.array([(st["T"][i] - float(a[hcells].sum(dtype=np.float64))) / nm for i, a in enumerate(Sf)])
 
+    def gcap_mean(pts):
+        """Средняя выгода (с потолком на ближнее поле) вдоль точек pts, мкм."""
+        i = np.floor(pts / p.dx).astype(int) % n
+        t = (i[:, 0], i[:, 1], i[:, 2])
+        g = graw[t]
+        if p.cap_local_only:
+            gm = _contract([a[t] for a in e_new], st["Sm"])
+            g = np.clip(g - gm, -cap, cap) + gm
+        else:
+            g = np.clip(g, -cap, cap)
+        return float(g.mean())
+
+    def make_plate(ci, nv):
+        """Пластинка из зародыша ci или None. Игла: из трёх ⟨11-20⟩ выбирается вариант с вероятностью
+        ∝ exp(β·ḡ), ḡ — средняя выгода вдоль её длины (взаимодействие формы с полем соседей)."""
+        if p.shape != "needle":
+            c0, R = grow_disc(ci, nv, grains, occ, p)
+            return dict(c=c0, n=nv.copy(), R=float(R)) if R >= p.R_min else None
+        opts = []
+        for u in needle_dirs(nv, a1[grains[ci]]):
+            c0, Aq, Bq = grow_needle(ci, nv, u, grains, occ, p)
+            if Aq >= p.A_min:
+                sg = np.linspace(-Aq, Aq, max(3, int(2 * Aq / p.dx) + 1))
+                opts.append((gcap_mean(c0[None] + sg[:, None] * u[None]), c0, u, Aq, Bq))
+        if not opts:
+            return None
+        sc = p.beta * np.array([o[0] for o in opts])
+        pr = np.exp(sc - sc.max())
+        _, c0, u, Aq, Bq = opts[rng.choice(len(opts), p=pr / pr.sum())]
+        return dict(c=c0, n=nv.copy(), u=u, A=float(Aq), B=float(Bq), R=float(np.sqrt(Aq * Bq)))
+
     plates = []
     bsum = resync_all()
     target = p.frac * n ** 3
@@ -463,8 +609,8 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
                 a, b, c = np.unravel_index(min(np.searchsorted(cs, rng.random() * cs[-1]), B ** 3 - 1), (B, B, B))
                 ci = (bi * B + a, bj * B + b, bl * B + c)
                 nv = cax[grains[ci]]
-                c0, R = grow_disc(ci, nv, grains, occ, p)
-                if R >= p.R_min:
+                q = make_plate(ci, nv)
+                if q is not None:
                     ok = True
                     break
                 bsum[bi, bj, bl] -= w[ci]
@@ -474,10 +620,11 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
                 break
         if not ok:
             break
+        c0 = q["c"]
         o = np.floor(c0 / p.dx).astype(int) - win // 2
         ix = [(o[d] + np.arange(win)) % n for d in range(3)]
         sel = np.ix_(*ix)
-        ax, fr = disc_fraction(win, p.dx, c0 - o * p.dx, nv, R, p.h_um)
+        ax, fr = plate_fraction(win, p.dx, c0 - o * p.dx, q, p.h_um)
         f = np.zeros((win,) * 3, np.float32)
         f[np.ix_(*ax)] = fr
         es = eps_star(nv)
@@ -502,7 +649,7 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
         for d in range(3):
             o2 |= np.roll(oc, 1, d) | np.roll(oc, -1, d)
         occ[dsel] = o2
-        plates.append(dict(c=c0 % (n * p.dx), n=nv.copy(), R=float(R), grain=int(grains[ci])))
+        plates.append(dict(q, c=c0 % (n * p.dx), grain=int(grains[ci])))
         if len(plates) % resync == 0:
             bsum = resync_all()
         elif p.cap_local_only and np.abs(Sm_now() - st["Sm"]).sum() > tol_mpa:
