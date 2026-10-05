@@ -1,6 +1,7 @@
 """Калибровка 3D-автомата (быстрый движок) по RHF Lepine при 0 / 200 / 250 МПа.
 python calib3d.py папка '{"beta": [...], "sigma_cap": [...], "sigma_app": [0, 200, 250], "seed": [1]}' [процессов] [L]
-RHF — по изображениям шести сечений ⊥ оси трубы (как на шлифе) и по следам дисков."""
+RHF — по изображениям 32 сечений ⊥ оси трубы (как на шлифе) и по следам дисков.
+python calib3d.py папка --image — пересчитать RHF по изображению для готовых прогонов (32 сечения)."""
 import os
 import sys
 import json
@@ -26,14 +27,30 @@ def job(kw):
     c = np.array([q["c"] for q in r["plates"]]); nv = np.array([q["n"] for q in r["plates"]])
     R = np.array([q["R"] for q in r["plates"]])
     np.savez_compressed(fn + ".npz", c=c, n=nv, R=R)
-    m = dict(kw, RHF_trace=section_rhf(r), RHF_image=rhf_sections(c, nv, R, kw["size_um"]), n_plates=len(R),
+    img, se = rhf_sections(c, nv, R, kw["size_um"], se=True)
+    m = dict(kw, RHF_trace=section_rhf(r), RHF_image=img, RHF_image_se=se, img_nsec=32, n_plates=len(R),
              R_mean=float(R.mean()), time_s=time.time() - t0)
     json.dump(m, open(fn + ".json", "w"), default=float)
     print(name, f"след {m['RHF_trace']:.2f} изобр. {m['RHF_image']:.2f} {m['time_s']:.0f} с", flush=True)
 
 
+def reimage(fn):
+    m = json.load(open(fn))
+    if m.get("img_nsec") == 32:
+        return
+    z = np.load(fn[:-5] + ".npz")
+    m["RHF_image"], m["RHF_image_se"] = rhf_sections(z["c"], z["n"], z["R"], m["size_um"], se=True)
+    m["img_nsec"] = 32
+    json.dump(m, open(fn, "w"), default=float)
+
+
 if __name__ == "__main__":
     out = sys.argv[1]
+    if sys.argv[2] == "--image":
+        import glob
+        with Pool(int(sys.argv[3]) if len(sys.argv) > 3 else 2) as pool:
+            list(pool.imap_unordered(reimage, glob.glob(os.path.join(out, "*.json"))))
+        sys.exit()
     os.makedirs(out, exist_ok=True)
     grid = json.loads(sys.argv[2])
     L = float(sys.argv[4]) if len(sys.argv) > 4 else 96.0

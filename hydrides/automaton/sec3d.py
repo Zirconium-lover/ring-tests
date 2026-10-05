@@ -44,6 +44,9 @@ def rhf_image(P, L, tile=None):
     return r["scales"][0]["RHF_simon"] if r["scales"] else np.nan
 
 
-def rhf_sections(c, nv, R, L, n_sec=6):
-    """Среднее RHF по изображениям n_sec равноотстоящих сечений."""
-    return float(np.nanmean([rhf_image(section_plates(c, nv, R, zc, L), L) for zc in (np.arange(n_sec) + 0.5) * L / n_sec]))
+def rhf_sections(c, nv, R, L, n_sec=32, se=False):
+    """Среднее RHF по изображениям n_sec равноотстоящих сечений (по одному сечению разброс ±0.15–0.25:
+    следы дисков короче 2 мкм, поэтому сечений нужно много). se=True — ещё и стандартная ошибка."""
+    v = np.array([rhf_image(section_plates(c, nv, R, zc, L), L) for zc in (np.arange(n_sec) + 0.5) * L / n_sec])
+    m = float(np.nanmean(v))
+    return (m, float(np.nanstd(v) / np.sqrt(np.isfinite(v).sum()))) if se else m
