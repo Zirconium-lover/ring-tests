@@ -204,7 +204,9 @@ def grow(c_idx, psi, grains, occ, p):
 
 
 # ------------------------------------------------------------------ прогон
-def run(p: Params, verbose=False):
+def run(p: Params, verbose=False, callback=None):
+    """callback(plates, expo, hyd, cH) вызывается перед выбором каждой новой пластинки
+    (expo — логарифм веса зарождения по клеткам; −inf там, где нельзя)."""
     global EPS_N, EPS_T
     EPS_N, EPS_T = p.eps_n, p.eps_t
     rng = np.random.default_rng(p.seed)
@@ -250,6 +252,8 @@ def run(p: Params, verbose=False):
         if not allowed.any():
             break
         expo = np.where(allowed, expo, -np.inf)
+        if callback is not None:
+            callback(plates, expo, hyd, cH)
         w = np.exp(expo - expo[allowed].max())
         w /= w.sum()
         k = rng.choice(w.size, p=w.ravel())
