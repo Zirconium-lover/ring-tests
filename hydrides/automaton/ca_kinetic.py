@@ -42,6 +42,9 @@ class KParams(Params):
     D0: float = 7.9e-7              # м²/с
     QD: float = 44.4e3              # Дж/моль
     t_grow: float = 10.0            # время роста пластинки, с: водород собирается с радиуса √(2·D·t_grow)
+    stress_diff: bool = False       # диффузия водорода и в растянутые области: c ∝ exp(V_H·σ_h/RT) в равновесии
+    V_H: float = 1.7e-6             # парциальный мольный объём водорода в Zr, м³/моль
+    sh_cap: float = 300.0           # ограничение гидростатического напряжения от соседей, МПа
 
 
 def run_kinetic(p: KParams, verbose=False, callback=None):
@@ -150,8 +153,17 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
             if batch:
                 add_batch(batch, deplete=False)
                 tried[:] = False
-        # диффузия водорода за шаг
-        c = np.fft.irfft2(np.fft.rfft2(c) * np.exp(-D * k2 * dt), s=(ny, nx))
+        # диффузия водорода за шаг; с напряжениями — по химическому потенциалу RT ln c − V_H σ_h
+        # (переменные Слотбома: u = c·e^(−φ) диффундирует, c = u·e^φ; масса сохраняется перенормировкой)
+        if p.stress_diff:
+            sh = np.clip((S11 + S22 + S33) / 3.0, -p.sh_cap, p.sh_cap)
+            phi = p.V_H * 1e6 * sh / (8.314 * Tk)
+            mass = c.sum()
+            u = np.fft.irfft2(np.fft.rfft2(c * np.exp(-phi)) * np.exp(-D * k2 * dt), s=(ny, nx))
+            c = u * np.exp(phi)
+            c *= mass / c.sum()
+        else:
+            c = np.fft.irfft2(np.fft.rfft2(c) * np.exp(-D * k2 * dt), s=(ny, nx))
         t += dt; T -= q * dt
         hist["t"].append(t); hist["T"].append(T); hist["c_mean"].append(float(c.mean()))
         hist["n"].append(len(plates)); hist["frac"].append(float(hyd.mean()))
