@@ -1,4 +1,4 @@
-"""Рисунок и таблица по проверкам trends.py: python trends_report.py папка"""
+"""Рисунок и таблица по проверкам trends.py: python trends_report.py папка [имя_рисунка] [подпись]"""
 import os
 import sys
 import json
@@ -9,6 +9,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 D = sys.argv[1]
+FIGNAME = sys.argv[2] if len(sys.argv) > 2 else "fig7_trends.png"
+TITLE = sys.argv[3] if len(sys.argv) > 3 else "последовательный движок"
 HERE = os.path.dirname(os.path.abspath(__file__))
 BLUE, ORANGE, AQUA, INK, MUTED, BG, GRID = "#2a78d6", "#eb6834", "#1baf7a", "#0b0b0b", "#52514e", "#fcfcfb", "#e4e2dc"
 RAMP = ["#9ec5f4", "#6da7ec", "#3987e5", "#1c5cab", "#0d366b"]
@@ -33,16 +35,19 @@ def thr(m, sig=SIG):
     return float(np.interp(LVL, m[k - 1:k + 1], sig[k - 1:k + 1])) if k > 0 and m[k] >= LVL else np.nan
 
 
-fig, axs = plt.subplots(1, 3, figsize=(16, 4.8), facecolor=BG, gridspec_kw=dict(wspace=0.3))
+MODES_ALL = sorted({r["config"]["case"]["mode"] for r in rows})
+M0 = "const" if "const" in MODES_ALL else MODES_ALL[0]
+HAS_RATE = any(r["config"]["case"]["name"].startswith("rate") for r in rows)
+fig, axs = plt.subplots(1, 4 if HAS_RATE else 3, figsize=(21 if HAS_RATE else 16, 4.8), facecolor=BG, gridspec_kw=dict(wspace=0.3))
 ax = axs[0]
 for H, col in zip(HS, RAMP):
     m = curve(f"H{H}", key="RHF_image") if False else np.array(
-        [np.mean([x["RHF_image"] for x in R.get(f"H{H}_s{s}_const", [{"RHF_image": np.nan}])]) for s in SIG])
+        [np.mean([x["RHF_image"] for x in R.get(f"H{H}_s{s}_{M0}", [{"RHF_image": np.nan}])]) for s in SIG])
     ax.plot(SIG, m, "o-", color=col, lw=2, ms=4, label=f"{H} ppm")
 ax.axhline(LVL, color=GRID, lw=1, ls=(0, (3, 3)))
 ax.set_xlabel("окружное напряжение при охлаждении, МПа"); ax.set_ylabel("RHF"); ax.set_ylim(0, 1)
 ax.legend(frameon=False, fontsize=9, title="водород", title_fontsize=9)
-ax.set_title("а) RHF при разном водороде (β, потолок постоянны)", loc="left", fontsize=10.5, color=INK)
+ax.set_title("а) RHF при разном водороде", loc="left", fontsize=10.5, color=INK)
 ax.grid(color=GRID, lw=0.6); ax.set_axisbelow(True)
 
 ax = axs[1]
@@ -50,7 +55,10 @@ hh = np.linspace(30, 480, 100)
 ax.plot(hh, 110 + 65 * (1 - np.exp(-hh / 65)), color=INK, lw=1.5, ls="--")
 ax.text(470, 182, "Desquines и др. 2014\n(Zry-4, опыт)", fontsize=8.5, color=INK, ha="right", va="bottom")
 table = {}
-for mode, col, lab in (("const", BLUE, "автомат: β и потолок постоянны"), ("T", ORANGE, "автомат: β ∝ 1/T, потолок ∝ σ_y(T)")):
+LABS = {"const": (BLUE, "по одной: β и потолок постоянны"), "T": (ORANGE, "по одной: β ∝ 1/T, потолок ∝ σ_y(T)"),
+        "kin": (AQUA, "кинетический: одновременное зарождение")}
+for mode in MODES_ALL:
+    col, lab = LABS[mode]
     t = []
     for H in HS:
         m = np.array([np.mean([x["RHF_image"] for x in R.get(f"H{H}_s{s}_{mode}", [{"RHF_image": np.nan}])]) for s in SIG])
@@ -72,11 +80,24 @@ ax.set_xlabel("максимальная температура цикла T_max,
 ax.legend(frameon=False, fontsize=9, title="напряжение", title_fontsize=9, loc="lower right")
 ax.set_title("в) неполное растворение (180 ppm)", loc="left", fontsize=10.5, color=INK)
 ax.grid(color=GRID, lw=0.6); ax.set_axisbelow(True)
-fig.suptitle("Проверка инструмента на общие закономерности (Zry-4, χ₀ = 30°, поле 240 × 240 мкм, 2 затравки)",
+if HAS_RATE:
+    ax = axs[3]
+    RT = [1, 3, 10, 30]
+    for s_, col in zip([100, 150, 200, 250], RAMP[1:]):
+        m = [np.mean([x["RHF_image"] for x in R.get(f"rate{q}_s{s_}", [{"RHF_image": np.nan}])]) for q in RT]
+        ax.plot(RT, m, "o-", color=col, lw=2, ms=5, label=f"{s_} МПа")
+    ax.set_xscale("log"); ax.set_xticks(RT); ax.set_xticklabels([str(q) for q in RT])
+    ax.set_xlabel("скорость охлаждения, °C/мин"); ax.set_ylabel("RHF"); ax.set_ylim(0, 1)
+    ax.legend(frameon=False, fontsize=9, title="напряжение", title_fontsize=9, loc="lower right")
+    ax.set_title("г) скорость охлаждения (180 ppm)", loc="left", fontsize=10.5, color=INK)
+    ax.grid(color=GRID, lw=0.6); ax.set_axisbelow(True)
+fig.suptitle(f"Проверка инструмента на общие закономерности: {TITLE} (Zry-4, χ₀ = 30°, поле 240 × 240 мкм, 2 затравки)",
              x=0.01, ha="left", fontsize=12, color=INK)
 os.makedirs(os.path.join(HERE, "figs"), exist_ok=True)
-fig.savefig(os.path.join(HERE, "figs", "fig7_trends.png"), dpi=115, facecolor=BG, bbox_inches="tight")
+fig.savefig(os.path.join(HERE, "figs", FIGNAME), dpi=115, facecolor=BG, bbox_inches="tight")
 for (mode, H), (m, t) in sorted(table.items()):
     print(f"{mode:5s} H={H:3d}: RHF " + " ".join(f"{v:.2f}" for v in m) + f"  порог {t:.0f} МПа" + f"   опыт {110 + 65 * (1 - np.exp(-H / 65)):.0f}")
 for s in [100, 150, 200, 250]:
+    if HAS_RATE:
+        print(f"скорость, σ={s}: " + " ".join(f"{q}:{np.mean([x['RHF_image'] for x in R.get(f'rate{q}_s{s}', [{'RHF_image': np.nan}])]):.2f}" for q in [1, 3, 10, 30]))
     print(f"T_max, σ={s}: " + " ".join(f"{T}:{np.mean([x['RHF_image'] for x in R.get(f'Tmax{T}_s{s}', [{'RHF_image': np.nan}])]):.2f}" for T in TM))

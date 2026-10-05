@@ -19,6 +19,7 @@ import numpy as np
 warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ca_hydride import Params, run  # noqa: E402
+from ca_kinetic import KParams, run_kinetic  # noqa: E402
 from ca_analysis import packet_metrics, image_rhf, interdistance  # noqa: E402
 from thermo import Cooling, area_fraction  # noqa: E402
 
@@ -61,10 +62,15 @@ class History:
     sigma: float = 0.0                      # окружное напряжение при охлаждении, МПа
     sigma_grad: float = 0.0                 # изменение по толщине (изгиб), МПа
     T_end: float = 20.0
+    rate: float = 3.0                       # скорость охлаждения, °C/мин (кинетический движок)
 
 
 @dataclass
 class Model:
+    engine: str = "seq"                     # "seq" — по одной пластинке; "kin" — время, одновременное зарождение
+    B: float = 40.0                         # kin: барьер на линии TSSP, kT
+    Delta0: float = 30.0                    # kin: избыток движущей силы на линии TSSP, МПа
+    nu_c: float = 1e-6                      # kin: скорость зарождения в клетке на TSSP, 1/с
     beta: float = 0.12                      # 1/МПа при T_ref
     sigma_cap: float = 90.0                 # МПа при T_ref (эффективный, см. fe/README.md)
     capture_um: float = 35.0
@@ -100,6 +106,13 @@ def simulate(mat: Material, tex: Texture, hist: History, model: Model = Model(),
                 np.savez_compressed(key, plates=P0)
         area = np.cumsum(2 * P0[:, 3] * 0.6) / (size_um[0] * size_um[1])
         init = P0[: max(1, int(np.searchsorted(area, th.frac_left)))]
+    if model.engine == "kin":
+        kp = KParams(**{k: v for k, v in base.items() if k not in ("beta", "capture_um")},
+                     H_ppm=hist.H_ppm, T_max=hist.T_max, T_end=max(hist.T_end, 100.0), rate=hist.rate,
+                     lines=mat.tss, B=model.B, Delta0=model.Delta0, nu_c=model.nu_c,
+                     sigma_app=hist.sigma, sigma_app_grad=hist.sigma_grad, init_plates=init)
+        r = run_kinetic(kp)
+        return _finish(r, th, init, mat, tex, hist, model, size_um, seed, dx, metrics)
     # 2. охлаждение под напряжением: температура каждой пластинки — по ходу выпадения
     cal = MATERIALS[model.cal_material]
     Tk_ref = model.T_ref + 273.15
@@ -117,6 +130,10 @@ def simulate(mat: Material, tex: Texture, hist: History, model: Model = Model(),
     p = Params(**base, frac=th.frac_new, sigma_app=hist.sigma, sigma_app_grad=hist.sigma_grad,
                init_plates=init, schedule=schedule)
     r = run(p)
+    return _finish(r, th, init, mat, tex, hist, model, size_um, seed, dx, metrics)
+
+
+def _finish(r, th, init, mat, tex, hist, model, size_um, seed, dx, metrics):
     out = dict(thermo=th.summary(), plates=r["plates"], hyd=r["hyd"], grains=r["grains"],
                config=dict(material=asdict(mat), texture=asdict(tex), history=asdict(hist), model=asdict(model),
                            size_um=list(size_um), seed=seed, dx=dx))
