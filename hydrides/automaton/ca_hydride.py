@@ -61,6 +61,7 @@ class Params:
     eps_t: float = EPS_T              # несоответствие в плоскости пластинки
     seed: int = 0
     record_every: int = 0             # сохранять снимки по ходу (0 — нет)
+    g_extra: object = None            # добавка к выгоде по клеткам, МПа (напряжения несовместности из МКЭ), массив (ny, nx)
 
 
 # ------------------------------------------------------------------ зёрна и текстура
@@ -243,6 +244,8 @@ def run(p: Params, verbose=False, callback=None):
         g_int = (e11n * S11 + e22n * S22 + 2 * e12n * S12 + e33n * S33) / EPS_N * p.kappa
         g_int = np.clip(g_int, -p.sigma_cap, p.sigma_cap)
         expo = p.beta * (g_int + g_app) + gorsky
+        if p.g_extra is not None:
+            expo = expo + p.beta * p.g_extra
         if p.beta_h:
             expo = expo + p.beta_h * p.kappa * (1 + p.nu) * (S11 + S22) / 3
         allowed = ~occ & ~tried
