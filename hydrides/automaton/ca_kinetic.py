@@ -104,7 +104,13 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     while T > p.T_end:
         Tk = T + 273.15
         g = (e11n * S11 + e22n * S22 + 2 * e12n * S12 + e33n * S33) / EPS_N * p.kappa
-        g = np.clip(g, -p.sigma_cap, p.sigma_cap) + g_app
+        if p.cap_local_only:
+            mtx = hyd < 0.2
+            Sm = [float(a[mtx].mean()) for a in (S11, S22, S12, S33)]
+            g_mean = (e11n * Sm[0] + e22n * Sm[1] + 2 * e12n * Sm[2] + e33n * Sm[3]) / EPS_N * p.kappa
+            g = np.clip(g - g_mean, -p.sigma_cap, p.sigma_cap) + g_mean + g_app
+        else:
+            g = np.clip(g, -p.sigma_cap, p.sigma_cap) + g_app
         if p.g_extra is not None:
             g = g + p.g_extra
         lnc = np.log(np.clip(c, 1e-6, None)) + lnc_gorsky

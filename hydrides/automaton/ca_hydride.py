@@ -64,6 +64,7 @@ class Params:
     g_extra: object = None            # добавка к выгоде по клеткам, МПа (напряжения несовместности из МКЭ), массив (ny, nx)
     init_plates: object = None        # пластинки, оставшиеся с прошлого цикла (не растворились): [(cy, cx, ψ, полудлина), ...]
     schedule: object = None           # schedule(progress 0..1) → dict(T, beta, sigma_cap, sigma_app, g_extra) — ход охлаждения
+    cap_local_only: bool = False      # потолок только на ближнее поле; среднее напряжение в металле — без потолка
 
 
 # ------------------------------------------------------------------ зёрна и текстура
@@ -279,7 +280,14 @@ def run(p: Params, verbose=False, callback=None):
             if "sigma_app" in st and st["sigma_app"] != sig:
                 sig = st["sigma_app"]; g_app, gorsky = applied(sig)
         g_int = (e11n * S11 + e22n * S22 + 2 * e12n * S12 + e33n * S33) / EPS_N * p.kappa
-        g_int = np.clip(g_int, -cap, cap)
+        if p.cap_local_only:
+            # среднее напряжение в металле (отклик на все гидриды) — без потолка, ближнее поле — с потолком
+            mtx = hyd < 0.2
+            Sm = [float(a[mtx].mean()) for a in (S11, S22, S12, S33)]
+            g_mean = (e11n * Sm[0] + e22n * Sm[1] + 2 * e12n * Sm[2] + e33n * Sm[3]) / EPS_N * p.kappa
+            g_int = np.clip(g_int - g_mean, -cap, cap) + g_mean
+        else:
+            g_int = np.clip(g_int, -cap, cap)
         expo = beta * (g_int + g_app) + gorsky
         if g_extra is not None:
             expo = expo + beta * g_extra

@@ -78,6 +78,7 @@ class Model:
     cap_mode: str = "const"                 # "const" | "sy"
     T_ref: float = 300.0                    # °C — средняя температура выпадения в калибровке
     cal_material: str = "Zry4_SR"           # материал калибровки (для cap_mode = "sy")
+    cap_local_only: bool = False            # потолок только на ближнее поле; среднее напряжение в металле — без потолка
 
 
 def _plates_arr(plates):
@@ -89,7 +90,7 @@ def simulate(mat: Material, tex: Texture, hist: History, model: Model = Model(),
     th = Cooling(hist.H_ppm, hist.T_max, hist.T_end, mat.tss)
     base = dict(size_um=tuple(size_um), dx=dx, grain_um=tuple(tex.grain_um), chi0=tex.chi0, chi_s=tex.chi_s,
                 chi0_profile=tuple(tex.chi0_profile), beta=model.beta, sigma_cap=model.sigma_cap,
-                capture_um=model.capture_um, E=mat.E, nu=mat.nu, seed=seed)
+                capture_um=model.capture_um, E=mat.E, nu=mat.nu, seed=seed, cap_local_only=model.cap_local_only)
     # 1. нерастворившиеся гидриды: исходная (окружная, без напряжения) структура при полном водороде,
     #    из неё остаются первые выпавшие пластинки — общей площадью frac_left
     init = None
