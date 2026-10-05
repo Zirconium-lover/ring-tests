@@ -15,20 +15,22 @@ from ca_hydride import Params, run  # noqa: E402
 from ca_analysis import packet_metrics, image_rhf  # noqa: E402
 from gextra import g_extra  # noqa: E402
 
-OUT, DT = sys.argv[1], float(sys.argv[2])
+OUT = sys.argv[1]
+MECH_ONLY = sys.argv[2] == "mech"                     # только разброс от упругой анизотропии под нагрузкой
+DT = 0.0 if MECH_ONLY else float(sys.argv[2])
 WORK = os.environ.get("FE_WORK", os.path.join(OUT, "fe"))
 BASE = dict(beta=0.12, sigma_cap=90.0, capture_um=35.0)
 
 
 def job(kw):
     kw = dict(BASE, **kw)
-    name = "_".join(f"{k}{v}" for k, v in sorted(kw.items())) + f"_dT{DT:g}"
+    name = "_".join(f"{k}{v}" for k, v in sorted(kw.items())) + ("_mech" if MECH_ONLY else f"_dT{DT:g}")
     fn = os.path.join(OUT, name + ".json")
     if os.path.exists(fn):
         return
     t0 = time.time()
     p = Params(**kw)
-    p.g_extra = g_extra(p, WORK, DT) if DT else None
+    p.g_extra = g_extra(p, WORK, DT) if (DT or MECH_ONLY) else None
     r = run(p)
     m, C, T = packet_metrics(r)
     m["RHF_image"] = image_rhf(r)
@@ -49,7 +51,7 @@ if __name__ == "__main__":
     for kw in jobs:
         p = Params(**dict(BASE, **kw))
         key = (p.chi0, p.chi0_profile, p.seed)
-        if DT and key not in seen:
+        if (DT or MECH_ONLY) and key not in seen:
             seen.add(key); g_extra(p, WORK, DT)
     with Pool(int(sys.argv[4]) if len(sys.argv) > 4 else 2) as pool:
         for _ in pool.imap_unordered(job, jobs):
