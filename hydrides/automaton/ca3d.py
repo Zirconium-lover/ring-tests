@@ -37,6 +37,7 @@ class P3:
     cap_local_only: bool = True
     capture_um: float = 35.0
     sigma_app: float = 0.0                  # окружное (x)
+    sigma_axial: float = 0.0                # осевое (z): двухосность σ_z/σ_θ (у трубы под давлением ≈ 0.5)
     h_um: float = 0.6
     R_max: float = 3.0
     R_min: float = 0.5
@@ -595,7 +596,7 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
     e_new = [a.astype(np.float32) for a in eps_star(ncell)]
     del ncell
     e_mean_xx = EPS_T + (EPS_N - EPS_T) / 3.0
-    g_app = (p.sigma_app * (e_new[0] - e_mean_xx) / EPS_N).astype(np.float32)
+    g_app = ((p.sigma_app * (e_new[0] - e_mean_xx) + p.sigma_axial * (e_new[2] - e_mean_xx)) / EPS_N).astype(np.float32)
     S = [np.zeros((n, n, n), np.float32) for _ in range(6)]
     Eacc = [np.zeros((n, n, n), np.float32) for _ in range(6)]   # собственная деформация всех пластинок
     graw = np.zeros((n, n, n), np.float32)                   # σ:ε*/ε_n без потолка
@@ -629,7 +630,7 @@ def run3d_fast(p: P3, win=32, resync=100, B=8, tol_mpa=1.0, verbose=False):
         else:
             F_ax = F["n"]
         F_eps = np.stack(eps_star(F_ax), 1)
-        F_gapp = p.sigma_app * (F_eps[:, 0] - e_mean_xx) / EPS_N
+        F_gapp = (p.sigma_app * (F_eps[:, 0] - e_mean_xx) + p.sigma_axial * (F_eps[:, 2] - e_mean_xx)) / EPS_N
         F_tree = cKDTree(F["cen"], boxsize=n * p.dx * (1 + 1e-9))
         F_cnt = np.diff(F["ptr"])
         wf = np.zeros(nfac)
