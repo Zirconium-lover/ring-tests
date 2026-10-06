@@ -93,6 +93,7 @@ class Model:
     grow_kin: bool = False                  # kin: рост пластинок во времени
     k_tip: float = 0.05                     # kin: скорость кончика в долях предела по диффузии
     cross_tol: float = 0.0                  # kin: продолжение кончика за границей при близком следе, град
+    dT_s: float = 0.0                       # kin: разброс температуры выпадения по зёрнам, °C
 
 
 def _plates_arr(plates):
@@ -129,7 +130,7 @@ def simulate(mat: Material, tex: Texture, hist: History, model: Model = Model(),
                      H_ppm=hist.H_ppm, T_max=hist.T_max, T_end=max(hist.T_end, 100.0), rate=hist.rate,
                      lines=mat.tss, B=model.B, Delta0=model.Delta0, nu_c=model.nu_c,
                      app_dT=model.app_dT, bias_dT=model.bias_dT, gb=model.gb, gb_dT=model.gb_dT, gb_tol=model.gb_tol,
-                     grow_kin=model.grow_kin, k_tip=model.k_tip, cross_tol=model.cross_tol,
+                     grow_kin=model.grow_kin, k_tip=model.k_tip, cross_tol=model.cross_tol, dT_s=model.dT_s,
                      sigma_app=hist.sigma, sigma_app_grad=hist.sigma_grad, init_plates=init)
         r = run_kinetic(kp)
         return _finish(r, th, init, mat, tex, hist, model, size_um, seed, dx, metrics)

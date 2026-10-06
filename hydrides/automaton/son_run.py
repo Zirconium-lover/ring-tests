@@ -25,6 +25,8 @@ VARIANTS = {
     "viz5": dict(bias_dT=5.0),
     "zry10.9": dict(bias_dT=10.9),
     "viz5_grow": dict(bias_dT=5.0, grow_kin=True, cross_tol=15.0),
+    "viz5_s3": dict(bias_dT=5.0, dT_s=3.0),         # разброс форы по зёрнам — ширина перехода
+    "viz5_s6": dict(bias_dT=5.0, dT_s=6.0),
 }
 SON_CWSR = {0: 0.0, 83: 0.038, 96: 0.107, 146: 0.454}
 SON_PRXA = {0: 0.0, 83: 0.115, 96: 0.263, 146: 0.540}
