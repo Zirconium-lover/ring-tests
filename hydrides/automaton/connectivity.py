@@ -16,7 +16,7 @@
   ~1 — сквозная цепочка; по смыслу как у Simon и др. 2021 и Kim и др. 2022, алгоритм Дейкстры);
 - распределение радиальных протяжённостей кластеров (для статистики по многим прогонам).
 Связными считаются гидриды ближе gap_um (разрешение снимка).
-python connectivity.py папка_с_npz [size_um dx]   — сводка по сохранённым расчётам (пластинки → поле)."""
+python connectivity.py папка_с_npz [size_um dx gap_um]   — сводка по сохранённым расчётам (пластинки → поле)."""
 import os
 import sys
 import glob
@@ -130,6 +130,7 @@ if __name__ == "__main__":
     d = sys.argv[1]
     size = float(sys.argv[2]) if len(sys.argv) > 2 else 240.0
     dx = float(sys.argv[3]) if len(sys.argv) > 3 else 0.4
+    gap = float(sys.argv[4]) if len(sys.argv) > 4 else 1.0
     n = int(round(size / dx))
     out = defaultdict(lambda: defaultdict(list))
     for f in sorted(glob.glob(d + "/*.npz")):
@@ -138,8 +139,8 @@ if __name__ == "__main__":
             continue
         meta = json.load(open(jf))
         P = np.load(f)["plates"]
-        m = metrics_of(P, (n, n), dx)
-        key = tuple((k, meta.get(k)) for k in ("bias_dT", "sigma_cap", "beta", "app") if k in meta)
+        m = metrics_of(P, (n, n), dx, gap_um=gap)
+        key = tuple((k, meta.get(k)) for k in ("bias_dT", "sigma_cap", "beta", "app", "gb", "gb_dT", "grow_kin") if k in meta)
         for k, v in m.items():
             if k != "extents":
                 out[key][(int(meta["sigma_app"]), k)].append(v)
