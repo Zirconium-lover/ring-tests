@@ -69,6 +69,8 @@ class Params:
     screen_scale: float = 1.0         # масштаб расстояний профиля экранирования (1 — как у пластинки 5 × 0.6 мкм в МКЭ)
     screen_d: tuple = (0.0, 0.75, 1.25, 1.75, 2.5, 3.5)        # расстояние до гидрида, мкм
     screen_s: tuple = (0.05, 0.08, 0.45, 0.45, 0.70, 1.0)      # доля действия приложенного напряжения (fe/biax_inh.py)
+    app_dg: object = None             # (σθ, Δg): выгода радиальной пластинки над окружной от нагрузки по МКЭ
+                                      # (fe/hill_runs.py, пластичность Мизеса или Хилла); None — упругая 0.36·σθ
 
 
 # ------------------------------------------------------------------ зёрна и текстура
@@ -236,7 +238,10 @@ def run(p: Params, verbose=False, callback=None):
     def applied(sig):
         """σ_xx = sig (вдоль TD), возможно с градиентом по толщине (ND) → (g_app, вклад Горского)."""
         sapp = (sig + p.sigma_app_grad * (0.5 - yfrac))[:, None] * np.ones((1, nx))
-        return sapp * (e11n - e_mean) / EPS_N, (p.v_h_over_rt * sapp / 3.0 if p.v_h_over_rt else 0.0)
+        gor = p.v_h_over_rt * sapp / 3.0 if p.v_h_over_rt else 0.0
+        if p.app_dg is not None:      # Δg(σθ) по МКЭ; между окружной и радиальной — как sin²ψ (как в упругости)
+            return np.interp(sapp, *p.app_dg) * (np.sin(psi_map) ** 2 - 0.5), gor
+        return sapp * (e11n - e_mean) / EPS_N, gor
 
     g_app, gorsky = applied(p.sigma_app)
     S11 = np.zeros((ny, nx)); S22 = np.zeros_like(S11); S12 = np.zeros_like(S11); S33 = np.zeros_like(S11)
