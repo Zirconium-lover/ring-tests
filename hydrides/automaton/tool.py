@@ -71,6 +71,9 @@ class Model:
     B: float = 40.0                         # kin: барьер на линии TSSP, kT
     Delta0: float = 30.0                    # kin: избыток движущей силы на линии TSSP, МПа
     nu_c: float = 1e-6                      # kin: скорость зарождения в клетке на TSSP, 1/с
+    app_dT: float = 0.0                     # kin: °C/МПа — сдвиг выпадения нормальным к пластинке напряжением
+                                            # (Vizcaíno 2014: 0.08); 0 — вклад нагрузки по app (упругий или МКЭ)
+    bias_dT: float = 0.0                    # kin: °C — фора выпадения зёрен с осью c по радиусу (дислокации, CWSR)
     beta: float = 0.08                      # 1/МПа при T_ref (с упругим вкладом нагрузки, app="el", было 0.12)
     sigma_cap: float = 240.0                # МПа при T_ref, ближнее поле (с app="el" было 90)
     capture_um: float = 35.0
@@ -116,6 +119,7 @@ def simulate(mat: Material, tex: Texture, hist: History, model: Model = Model(),
         kp = KParams(**{k: v for k, v in base.items() if k not in ("beta", "capture_um")},
                      H_ppm=hist.H_ppm, T_max=hist.T_max, T_end=max(hist.T_end, 100.0), rate=hist.rate,
                      lines=mat.tss, B=model.B, Delta0=model.Delta0, nu_c=model.nu_c,
+                     app_dT=model.app_dT, bias_dT=model.bias_dT,
                      sigma_app=hist.sigma, sigma_app_grad=hist.sigma_grad, init_plates=init)
         r = run_kinetic(kp)
         return _finish(r, th, init, mat, tex, hist, model, size_um, seed, dx, metrics)
