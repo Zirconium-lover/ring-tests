@@ -50,6 +50,21 @@ class KParams(Params):
                                     # > 0 — заменяет упругий вклад нагрузки (g_app) этим измеренным
     bias_dT: float = 0.0            # °C: фора выпадения в зёрнах с осью c по радиусу (∝ cos²ψ) — плотность
                                     # дислокаций зависит от ориентации зерна (Vizcaíno: 5 °C между семействами зёрен)
+    # межзёренный канал: пластинка вдоль грани зерна, след грани не дальше gb_tol от базисного следа одного
+    # из двух соседей (соотношение ориентаций с одним соседом: Qin и др. 2011, Son и др. 2026)
+    dT_s: float = 0.0               # °C: разброс температуры выпадения по зёрнам (неоднородность мест зарождения:
+                                    # дислокации, остаточные напряжения), нормальный, своё значение у каждого зерна
+    gb: bool = False
+    gb_dT: float = 0.0              # °C: фора зарождения на границе против тела зерна (ниже барьер)
+    gb_dT_s: float = 0.0            # °C: разброс форы по граням (энергия границы зависит от разориентации)
+    gb_tol: float = 15.0            # град: допуск между следом грани и базисным следом соседа
+    gb_L_max: float = 0.0           # наибольшая длина межзёренной пластинки (0 — как L_max)
+    # рост во времени: зародыш длиной L_min, кончики идут со скоростью v = k_tip·D/h·(c − TSSD)/C_гидрида
+    # (k_tip = 1 — предел по диффузии к кончику радиусом h/2; рост медленнее — k_tip < 1, как в HNGD)
+    grow_kin: bool = False
+    k_tip: float = 0.05
+    cross_tol: float = 0.0          # град: упёршись в границу, кончик продолжается в соседнем зерне (или на
+                                    # соседней грани), если след там отличается не больше (Fang 2017, Son 2026); 0 — нет
 
 
 def run_kinetic(p: KParams, verbose=False, callback=None):
@@ -57,7 +72,10 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     EPS_N, EPS_T = p.eps_n, p.eps_t
     L = TSS[p.lines] if isinstance(p.lines, str) else p.lines
     rng = np.random.default_rng(p.seed)
-    grains, gpsi = make_grains(p, rng)
+    if p.gb:
+        grains, gpsi, gbd = make_grains(p, rng, gb=True)
+    else:
+        grains, gpsi = make_grains(p, rng)
     ny, nx = grains.shape
     el = Elastic((ny, nx), p.dx, p.E, p.nu)
     psi_map = gpsi[grains]
@@ -73,14 +91,181 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     # измеренный сдвиг температуры выпадения: нормальное напряжение на пластинке σ_nn = σθ·sin²ψ и фора зёрен
     # с осью c по радиусу (cos²ψ), в градусах; в движущую силу (МПа) — через наклон линии TSSP: n_H·Q/T
     dT_map = p.app_dT * sapp * np.sin(psi_map) ** 2 + p.bias_dT * np.cos(psi_map) ** 2
+    if p.dT_s > 0:                      # свой генератор: зёрна и остальные случайные числа не меняются
+        dT_map = dT_map + np.random.default_rng([p.seed, 11]).normal(0.0, p.dT_s, len(gpsi))[grains]
     Q_over_R = np.log(10.0) * 1000.0 * L["TSSP"][1]
     if p.app_dT > 0:
         g_app = np.zeros_like(g_app)
+    ngb = 0
+    if p.gb:
+        # грани, след которых близок (gb_tol) к базисному следу хотя бы одного из двух соседей
+        ang = lambda a, b: np.abs((a - b + np.pi / 2) % np.pi - np.pi / 2)
+        d1, d2 = ang(gbd["psi"], gpsi[gbd["pair"][:, 0]]), ang(gbd["psi"], gpsi[gbd["pair"][:, 1]])
+        keep = np.minimum(d1, d2) <= np.radians(p.gb_tol)
+        gcell, gpair, gpsi_f = gbd["cells"][keep], gbd["pair"][keep], gbd["psi"][keep]
+        gmatch = np.where(d1[keep] <= d2[keep], gpair[:, 0], gpair[:, 1])     # зерно с соотношением ориентаций
+        uniq, gpid = np.unique(gpair, axis=0, return_inverse=True)
+        gpid = gpid.ravel()
+        pid_map = np.full(ny * nx, -1); pid_map[gcell] = gpid; pid_map = pid_map.reshape(ny, nx)
+        ngb = len(gcell)
+        dTs = np.random.default_rng([p.seed, 7]).normal(0.0, p.gb_dT_s, len(uniq))[gpid] if p.gb_dT_s > 0 else 0.0
+        sg = sapp.ravel()[gcell]
+        dT_gb = p.app_dT * sg * np.sin(gpsi_f) ** 2 + p.bias_dT * np.cos(gpsi_f) ** 2 + p.gb_dT + dTs
+        ge11, ge22, ge12 = eigen_components_for(gpsi_f)
+        if p.app_dT > 0:
+            g_app_gb = np.zeros(ngb)
+        elif p.app_dg is not None:
+            g_app_gb = np.interp(sg, *p.app_dg) * (np.sin(gpsi_f) ** 2 - 0.5)
+        else:
+            g_app_gb = sg * (ge11 - e_mean) / EPS_N
+        tried_gb = np.zeros(ngb, bool)
+        L_gb = p.gb_L_max if p.gb_L_max > 0 else p.L_max
+
+        def grow_gb(k, occ_b):
+            """Пластинка по следу грани от клетки k, пока рядом (3×3) клетки той же грани и свободно."""
+            iy0, ix0 = divmod(int(gcell[k]), nx)
+            psi = gpsi_f[k]; pid = gpid[k]
+            ty, tx = -np.sin(psi), np.cos(psi)
+            step = p.dx * 0.5
+            ext = []
+            for sgn in (1, -1):
+                d = 0.0
+                while d < L_gb / 2:
+                    d2 = d + step
+                    yy = (iy0 + 0.5) * p.dx + sgn * d2 * ty
+                    xx = (ix0 + 0.5) * p.dx + sgn * d2 * tx
+                    iy, ix = int(np.floor(yy / p.dx)), int(np.floor(xx / p.dx))
+                    if occ_b[iy % ny, ix % nx]:
+                        break
+                    win = pid_map[np.arange(iy - 1, iy + 2)[:, None] % ny, np.arange(ix - 1, ix + 2)[None, :] % nx]
+                    if not (win == pid).any():
+                        break
+                    d = d2
+                ext.append(d)
+            a, b = ext
+            shift = 0.5 * (a - b)
+            return np.array([(iy0 + 0.5) * p.dx + shift * ty, (ix0 + 0.5) * p.dx + shift * tx]), 0.5 * (a + b)
     S11 = np.zeros((ny, nx)); S22 = np.zeros_like(S11); S12 = np.zeros_like(S11); S33 = np.zeros_like(S11)
     occ = np.zeros((ny, nx), bool)
     hyd = np.zeros((ny, nx))
     tried = np.zeros((ny, nx), bool)
     plates = []
+    owner = np.full((ny, nx), -1, np.int32)     # номер пластинки в клетке (рост во времени)
+    tips = []                                   # растущие пластинки: концы A (−t), B (+t), активность концов
+    ang = lambda a, b: np.abs((a - b + np.pi / 2) % np.pi - np.pi / 2)
+
+    def tvec(psi):
+        return np.array([-np.sin(psi), np.cos(psi)])
+
+    def claim(cc, psi, half, pid):
+        ys, xs, fr, _ = plate_eigen((ny, nx), p.dx, cc, psi, half, p.h_um)
+        sel = np.ix_(ys, xs)
+        o = owner[sel]
+        o[(fr > 0.2) & (o < 0)] = pid
+        owner[sel] = o
+        return ys, xs, fr
+
+    def new_tip(pid, A, B, psi, kind, gid, act=(True, True)):
+        tips.append(dict(pid=pid, A=np.array(A, float), B=np.array(B, float), psi=float(psi), kind=kind, gid=int(gid),
+                         act=list(act), acc=[0.0, 0.0]))
+
+    def blocked(iy, ix, pid):
+        w = owner[np.arange(iy - 1, iy + 2)[:, None] % ny, np.arange(ix - 1, ix + 2)[None, :] % nx]
+        return bool(((w >= 0) & (w != pid)).any())
+
+    def try_cross(P, u, psi, e):
+        """Кончик упёрся в границу (или конец грани): продолжение в соседнем зерне или на соседней грани
+        со следом, отличающимся не больше cross_tol; новая пластинка нулевой длины с одним активным концом."""
+        Q = P + 1.5 * p.dx * u
+        iy, ix = int(np.floor(Q[0] / p.dx)) % ny, int(np.floor(Q[1] / p.dx)) % nx
+        best = None
+        gq = grains[iy, ix]
+        if not (e["kind"] == "intra" and gq == e["gid"]):
+            d = ang(gpsi[gq], psi)
+            if d <= np.radians(p.cross_tol):
+                best = (d, "intra", gq, gpsi[gq])
+        if ngb:
+            win = pid_map[np.arange(iy - 1, iy + 2)[:, None] % ny, np.arange(ix - 1, ix + 2)[None, :] % nx]
+            for f_id in np.unique(win[win >= 0]):
+                if e["kind"] == "gb" and f_id == e["gid"]:
+                    continue
+                k = np.flatnonzero(gpid == f_id)[0]
+                d = ang(gpsi_f[k], psi)
+                if d <= np.radians(p.cross_tol) and (best is None or d < best[0]):
+                    best = (d, "gb", f_id, gpsi_f[k])
+        if best is None or blocked(int(np.floor(Q[0] / p.dx)), int(np.floor(Q[1] / p.dx)), e["pid"]):
+            return
+        _, kind, gid, psi2 = best
+        t2 = tvec(psi2)
+        fwd = 1 if np.dot(t2, u) >= 0 else 0
+        pid = len(plates)                               # начинается за границей, в 1.5 клетки от кончика
+        plates.append(dict(c=Q.copy(), psi=float(psi2), half=0.0, T=float(T), t=float(t), init=False, cont=True,
+                           grain=int(gid if kind == "intra" else gmatch[np.flatnonzero(gpid == gid)[0]]), kind=kind))
+        new_tip(pid, Q, Q, psi2, kind, gid, act=(fwd == 0, fwd == 1))
+
+    def grow_tips(dt, D, c_g):
+        """Шаг роста всех активных кончиков; водород — из клеток прироста; общий прирост не больше половины
+        пересыщения над TSSD на поле."""
+        v0 = p.k_tip * D / p.h_um / C_HYD                # мкм/с на 1 ppm пересыщения
+        req = []
+        for e in tips:
+            for end in (0, 1):
+                if not e["act"][end]:
+                    continue
+                P = e["B"] if end else e["A"]
+                iy, ix = int(np.floor(P[0] / p.dx)), int(np.floor(P[1] / p.dx))
+                sup = float(c[np.arange(iy - 1, iy + 2)[:, None] % ny, np.arange(ix - 1, ix + 2)[None, :] % nx].mean()) - c_g
+                if sup > 0:
+                    req.append((e, end, v0 * sup * dt))
+        if not req:
+            return []
+        need = sum(r[2] for r in req) * p.h_um * C_HYD / p.dx ** 2       # ppm·клетка
+        have = float(np.clip(c - c_g, 0, None).sum())
+        fscale = min(1.0, 0.5 * have / need) if need > 0 else 1.0
+        segs = []
+        step = 0.5 * p.dx
+        for e, end, dl in req:
+            e["acc"][end] += dl * fscale
+            if e["acc"][end] < step:
+                continue
+            P = (e["B"] if end else e["A"]).copy()
+            sgn = 1.0 if end else -1.0
+            tv = tvec(e["psi"]); u = sgn * tv
+            length = float(np.linalg.norm(e["B"] - e["A"]))
+            Lcap = (L_gb if e["kind"] == "gb" else p.L_max)
+            d, stop = 0.0, None
+            while d + step <= e["acc"][end]:
+                if length + d + step > Lcap:
+                    stop = "len"; break
+                Q = P + (d + step) * u
+                iy, ix = int(np.floor(Q[0] / p.dx)), int(np.floor(Q[1] / p.dx))
+                if blocked(iy, ix, e["pid"]):
+                    stop = "occ"; break
+                if e["kind"] == "gb":
+                    win = pid_map[np.arange(iy - 1, iy + 2)[:, None] % ny, np.arange(ix - 1, ix + 2)[None, :] % nx]
+                    if not (win == e["gid"]).any():
+                        stop = "gb"; break
+                elif grains[iy % ny, ix % nx] != e["gid"]:
+                    stop = "gb"; break
+                d += step
+            e["acc"][end] = 0.0 if stop else e["acc"][end] - d
+            if d > 0:
+                P2 = P + d * u
+                segs.append((0.5 * (P + P2), e["psi"], 0.5 * d))
+                ys, xs, fr = claim(0.5 * (P + P2), e["psi"], 0.5 * d, e["pid"])
+                c[np.ix_(ys, xs)] -= fr * C_HYD
+                if end:
+                    e["B"] = P2
+                else:
+                    e["A"] = P2
+                q_ = plates[e["pid"]]
+                q_["c"] = 0.5 * (e["A"] + e["B"]); q_["half"] = 0.5 * float(np.linalg.norm(e["B"] - e["A"]))
+                P = P2
+            if stop:
+                e["act"][end] = False
+                if stop == "gb" and p.cross_tol > 0:
+                    try_cross(P, u, e["psi"], e)
+        return segs
     ky = 2 * np.pi * np.fft.fftfreq(ny, p.dx)[:, None]
     kx = 2 * np.pi * np.fft.rfftfreq(nx, p.dx)[None, :]
     k2 = kx ** 2 + ky ** 2
@@ -110,7 +295,11 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         add_batch(init, deplete=False)
         for (cc, psi, half) in init:
             iy, ix = int(cc[0] / p.dx) % ny, int(cc[1] / p.dx) % nx
-            plates.append(dict(c=cc, psi=float(psi), half=float(half), grain=int(grains[iy, ix]), T=None, t=None, init=True))
+            plates.append(dict(c=cc, psi=float(psi), half=float(half), grain=int(grains[iy, ix]), T=None, t=None, init=True,
+                               kind="init"))
+            if p.grow_kin:
+                claim(cc, psi, half, len(plates) - 1)
+                new_tip(len(plates) - 1, cc - half * tvec(psi), cc + half * tvec(psi), psi, "intra", grains[iy, ix])
     T, t = p.T_max, 0.0
     q = p.rate / 60.0                                   # °C/с
     hist = dict(t=[], T=[], c_mean=[], n=[], frac=[])
@@ -132,14 +321,34 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         ok = (Delta > 0) & ~occ & ~tried
         lnr = np.full((ny, nx), -np.inf)
         lnr[ok] = np.log(p.nu_c) - p.B * ((p.Delta0 / Delta[ok]) ** 2 - 1.0)
+        if ngb:
+            # межзёренные зародыши: та же формула, но ε* — для пластинки по следу грани
+            Sf = [a.ravel()[gcell] for a in (S11, S22, S12, S33)]
+            g_gb = (ge11 * Sf[0] + ge22 * Sf[1] + 2 * ge12 * Sf[2] + e33n * Sf[3]) / EPS_N * p.kappa
+            if p.cap_local_only:
+                gm = (ge11 * Sm[0] + ge22 * Sm[1] + 2 * ge12 * Sm[2] + e33n * Sm[3]) / EPS_N * p.kappa
+                g_gb = np.clip(g_gb - gm, -p.sigma_cap, p.sigma_cap) + gm + g_app_gb
+            else:
+                g_gb = np.clip(g_gb, -p.sigma_cap, p.sigma_cap) + g_app_gb
+            if p.g_extra is not None:
+                g_gb = g_gb + np.asarray(p.g_extra).ravel()[gcell]
+            Delta_gb = p.Delta0 + N_H_MPa_per_K * Tk * (lnc.ravel()[gcell] - np.log(c_line(T, L["TSSP"]))) \
+                + EPS_N * g_gb + N_H_MPa_per_K * Q_over_R / Tk * dT_gb
+            ok_gb = (Delta_gb > 0) & ~occ.ravel()[gcell] & ~tried_gb
+            lnr_gb = np.full(ngb, -np.inf)
+            lnr_gb[ok_gb] = np.log(p.nu_c) - p.B * ((p.Delta0 / Delta_gb[ok_gb]) ** 2 - 1.0)
+        else:
+            ok_gb = np.zeros(0, bool); lnr_gb = np.zeros(0)
         D = p.D0 * np.exp(-p.QD / (8.314 * Tk)) * 1e12   # мкм²/с
         rad_um = np.sqrt(2 * D * p.t_grow)
         c_eq = c_line(T, L["TSSD"])
         dt = p.dT_max / q
         lam_tot = 0.0
-        if ok.any():
-            m = lnr[ok].max()
+        if ok.any() or ok_gb.any():
+            m = max(lnr[ok].max() if ok.any() else -np.inf, lnr_gb[ok_gb].max() if ok_gb.any() else -np.inf)
             w = np.exp(lnr - m)                         # относительные веса
+            if ngb:
+                w = np.concatenate([w.ravel(), np.exp(lnr_gb - m)])
             lam_tot = float(np.exp(m) * w.sum() * dt)
             if lam_tot > p.lam_max:                     # всплеск зарождения — шаг короче (не короче 1/20 обычного)
                 k_dt = max(p.lam_max / lam_tot, 0.05)
@@ -152,27 +361,54 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
             batch = []
             occ_b = occ.copy()
             for k in rng.permutation(idx):
-                ci = np.unravel_index(k, (ny, nx))
+                kgb = k - ny * nx                       # ≥ 0 — межзёренный зародыш номер kgb
+                ci = np.unravel_index(k if kgb < 0 else gcell[kgb], (ny, nx))
                 if occ_b[ci]:
                     continue
-                psi = psi_map[ci]
-                cc, half = grow(ci, psi, grains, occ_b, p)
+                if kgb < 0:
+                    psi = psi_map[ci]
+                    cc, half = grow(ci, psi, grains, occ_b, p)
+                else:
+                    psi = gpsi_f[kgb]
+                    cc, half = grow_gb(kgb, occ_b)
                 # водорода сверх TSSD в окрестности радиусом ~ диффузионной длины роста хватает не на всё
                 R = int(np.clip(2 * rad_um, 2.0, 60.0) / p.dx)
                 yy = np.arange(ci[0] - R, ci[0] + R + 1) % ny; xx = np.arange(ci[1] - R, ci[1] + R + 1) % nx
-                avail = float(np.clip(c[np.ix_(yy, xx)] - c_eq, 0, None).sum())       # ppm·клетка
+                # чистый избыток над TSSD (с уже обеднёнными клетками — иначе зародыши одного шага берут водород дважды)
+                avail = max(0.0, float((c[np.ix_(yy, xx)] - c_eq).sum()))             # ppm·клетка
                 half = min(half, avail / C_HYD * p.dx ** 2 / (2 * p.h_um))
                 if 2 * half < p.L_min:
-                    tried[ci] = True
+                    if kgb < 0:
+                        tried[ci] = True
+                    else:
+                        tried_gb[kgb] = True
                     continue
+                if p.grow_kin:                          # зародыш L_min у места зарождения, дальше растёт
+                    tv = tvec(psi)
+                    h0 = min(0.5 * p.L_min, half)
+                    s0 = float(np.dot((np.array(ci) + 0.5) * p.dx - cc, tv))
+                    cc = cc + float(np.clip(s0, -half + h0, half - h0)) * tv
+                    half = h0
                 batch.append((cc, psi, half))
                 ys, xs, fr, _ = plate_eigen((ny, nx), p.dx, cc, psi, half, p.h_um)
                 occ_b[np.ix_(ys, xs)] |= fr > 0.2       # зародыши шага не перекрываются
                 c[np.ix_(ys, xs)] -= fr * C_HYD          # водород пластинки — сразу, дальше разойдётся диффузией
-                plates.append(dict(c=cc, psi=float(psi), half=float(half), grain=int(grains[ci]), T=float(T), t=float(t), init=False))
+                plates.append(dict(c=cc, psi=float(psi), half=float(half), T=float(T), t=float(t), init=False,
+                                   grain=int(grains[ci] if kgb < 0 else gmatch[kgb]), kind="intra" if kgb < 0 else "gb"))
+                if p.grow_kin:
+                    pid = len(plates) - 1
+                    claim(cc, psi, half, pid)
+                    new_tip(pid, cc - half * tv, cc + half * tv, psi, "intra" if kgb < 0 else "gb",
+                            grains[ci] if kgb < 0 else gpid[kgb])
             if batch:
                 add_batch(batch, deplete=False)
                 tried[:] = False
+                if ngb:
+                    tried_gb[:] = False
+        if p.grow_kin and tips:                         # рост кончиков за шаг (и зародышей этого шага)
+            segs = grow_tips(dt, D, c_eq)
+            if segs:
+                add_batch(segs, deplete=False)
         # диффузия водорода за шаг; с напряжениями — по химическому потенциалу RT ln c − V_H σ_h
         # (переменные Слотбома: u = c·e^(−φ) диффундирует, c = u·e^φ; масса сохраняется перенормировкой)
         if p.stress_diff:
@@ -191,5 +427,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
             callback(plates, lnr, hyd, c, T)
         if verbose and n_new:
             print(f"T {T:6.1f}  c̄ {c.mean():6.1f} (TSSP {c_line(T, L['TSSP']):6.1f})  пластинок {len(plates)}")
+    if p.grow_kin:
+        plates = [q_ for q_ in plates if q_["init"] or q_["half"] >= 0.5 * p.dx]
     return dict(params=p, plates=plates, hyd=hyd, grains=grains, gpsi=gpsi, S=(S11, S22, S12, S33),
                 c=c, hist={k: np.array(v) for k, v in hist.items()})

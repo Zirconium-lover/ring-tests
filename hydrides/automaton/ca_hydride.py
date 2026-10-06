@@ -74,7 +74,11 @@ class Params:
 
 
 # ------------------------------------------------------------------ зёрна и текстура
-def make_grains(p, rng):
+def make_grains(p, rng, gb=False):
+    """Зёрна (номер зерна по клеткам) и углы следа базисной плоскости. gb=True — ещё и границы зёрен:
+    dict(cells — индексы клеток на границе (тонкая цифровая линия вдоль грани Вороного), pair — пары
+    зёрен (меньший, больший номер), psi — угол следа грани от TD). Случайные числа расходуются так же,
+    как без gb, поэтому зёрна одинаковые."""
     ny, nx = int(p.size_um[0] / p.dx), int(p.size_um[1] / p.dx)
     area = p.size_um[0] * p.size_um[1]
     n = int(area / (p.grain_um[0] * p.grain_um[1]))
@@ -97,7 +101,23 @@ def make_grains(p, rng):
         chi = p.chi0
     psi = sign * chi + rng.normal(0, p.chi_s, size=n)
     psi = (psi + 90) % 180 - 90                         # в (−90, 90]
-    return grains, np.radians(psi)
+    if not gb:
+        return grains, np.radians(psi)
+    # граница двух ближайших семян (в растянутой метрике) — прямая n·x = b, n = S²(x2 − x1);
+    # клетка на границе, если её центр ближе к прямой, чем dx/2·max(|n_y|, |n_x|)/|n| (по клетке на столбец/строку)
+    _, j2 = tree.query(pts * sc, k=2)
+    r1, r2 = reps[j2[:, 0]], reps[j2[:, 1]]
+    nvec = (r2 - r1) * sc ** 2
+    b = 0.5 * (((r2 * sc) ** 2).sum(1) - ((r1 * sc) ** 2).sum(1))
+    nn = np.linalg.norm(nvec, axis=1)
+    dist = np.abs((pts * nvec).sum(1) - b) / nn
+    on = dist <= 0.5 * p.dx * np.abs(nvec).max(1) / nn
+    g1, g2 = ids[j2[on, 0]], ids[j2[on, 1]]
+    # след грани: t ⟂ n; в осях (строка вниз, столбец) t = (−sin ψ, cos ψ) → ψ = atan2(n_x, n_y)
+    psi_f = np.arctan2(nvec[on, 1], nvec[on, 0])
+    psi_f = (psi_f + np.pi / 2) % np.pi - np.pi / 2
+    gbd = dict(cells=np.flatnonzero(on), pair=np.stack([np.minimum(g1, g2), np.maximum(g1, g2)], 1), psi=psi_f)
+    return grains, np.radians(psi), gbd
 
 
 # ------------------------------------------------------------------ микроупругость (Фурье)

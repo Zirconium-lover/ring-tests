@@ -31,9 +31,16 @@ def job(a):
     new = [q for q in r["plates"] if not q.get("init")]
     m["T_first"] = new[0]["T"] if new else np.nan
     m["T_median"] = float(np.median([q["T"] for q in new])) if new else np.nan
+    # доля длины межзёренных пластинок (как у Son и др. 2026), всего и среди радиальных (след под 45–135°)
+    L = np.array([2 * q["half"] for q in new]); gbk = np.array([q.get("kind") == "gb" for q in new], bool)
+    rad = np.array([abs(np.sin(q["psi"])) >= np.sin(np.radians(45)) for q in new], bool)
+    m["GB_frac"] = float(L[gbk].sum() / L.sum()) if len(L) else np.nan
+    m["GB_frac_rad"] = float(L[gbk & rad].sum() / L[rad].sum()) if rad.any() else np.nan
+    m["GB_frac_circ"] = float(L[gbk & ~rad].sum() / L[~rad].sum()) if (~rad).any() else np.nan
     m.update(dict(BASE, **kw), time_s=time.time() - t0)
     np.savez_compressed(os.path.join(out, name + ".npz"),
-                        plates=np.array([[q["c"][0], q["c"][1], q["psi"], q["half"]] for q in r["plates"]]))
+                        plates=np.array([[q["c"][0], q["c"][1], q["psi"], q["half"]] for q in r["plates"]]),
+                        kind=np.array([{"intra": 0, "gb": 1}.get(q.get("kind"), -1) for q in r["plates"]]))
     json.dump(m, open(fn, "w"), default=float)
 
 
