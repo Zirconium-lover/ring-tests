@@ -44,6 +44,9 @@ MATERIALS = {
     # Zry-4 отожж. для снятия напряжений — ≈ 350 МПа при 350 °C (оценка по литературе), 20 °C — ≈ 520
     "E635": Material("Э635 (рекристаллизованный)", "E635", ((20, 448), (380, 226))),
     "Zry4_SR": Material("Zry-4 (снятие напряжений)", "E635", ((20, 520), (350, 350))),
+    # Son и др. 2026: CWSR Zr-Nb (линии как у Э635) и частично рекристаллизованный Zr-1.1Nb-0.05Cu (как Э110опт)
+    "ZrNb_CWSR": Material("Zr-Nb (CWSR)", "E635"),
+    "Zr1Nb_PRXA": Material("Zr-1.1Nb-0.05Cu (PRXA)", "E110opt"),
 }
 
 
@@ -84,6 +87,12 @@ class Model:
     cap_local_only: bool = True             # потолок только на ближнее поле; среднее напряжение в металле — без потолка
     app: str = "iso2d"                      # вклад нагрузки в выбор ориентации: "iso2d" — пластичность по МКЭ
                                             # (fe/hill_table.json, Δg ≈ σθ); "el" — упругий 0.36·σθ (с ним β 0.12, потолок 90)
+    gb: bool = False                        # kin: межзёренный канал (зародыш на грани, след грани ≤ gb_tol от базиса соседа)
+    gb_dT: float = 1.5                      # kin: фора границы, °C (теория зарождения, энергии Jo 2025)
+    gb_tol: float = 15.0                    # kin: допуск след грани — базисный след соседа, град
+    grow_kin: bool = False                  # kin: рост пластинок во времени
+    k_tip: float = 0.05                     # kin: скорость кончика в долях предела по диффузии
+    cross_tol: float = 0.0                  # kin: продолжение кончика за границей при близком следе, град
 
 
 def _plates_arr(plates):
@@ -119,7 +128,8 @@ def simulate(mat: Material, tex: Texture, hist: History, model: Model = Model(),
         kp = KParams(**{k: v for k, v in base.items() if k not in ("beta", "capture_um")},
                      H_ppm=hist.H_ppm, T_max=hist.T_max, T_end=max(hist.T_end, 100.0), rate=hist.rate,
                      lines=mat.tss, B=model.B, Delta0=model.Delta0, nu_c=model.nu_c,
-                     app_dT=model.app_dT, bias_dT=model.bias_dT,
+                     app_dT=model.app_dT, bias_dT=model.bias_dT, gb=model.gb, gb_dT=model.gb_dT, gb_tol=model.gb_tol,
+                     grow_kin=model.grow_kin, k_tip=model.k_tip, cross_tol=model.cross_tol,
                      sigma_app=hist.sigma, sigma_app_grad=hist.sigma_grad, init_plates=init)
         r = run_kinetic(kp)
         return _finish(r, th, init, mat, tex, hist, model, size_um, seed, dx, metrics)
@@ -144,7 +154,7 @@ def simulate(mat: Material, tex: Texture, hist: History, model: Model = Model(),
 
 
 def _finish(r, th, init, mat, tex, hist, model, size_um, seed, dx, metrics):
-    out = dict(thermo=th.summary(), plates=r["plates"], hyd=r["hyd"], grains=r["grains"],
+    out = dict(thermo=th.summary(), plates=r["plates"], hyd=r["hyd"], grains=r["grains"], params=r["params"],
                config=dict(material=asdict(mat), texture=asdict(tex), history=asdict(hist), model=asdict(model),
                            size_um=list(size_um), seed=seed, dx=dx))
     if metrics:
