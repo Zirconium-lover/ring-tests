@@ -62,6 +62,8 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     sapp = (p.sigma_app + p.sigma_app_grad * (0.5 - yfrac))[:, None] * np.ones((1, nx))
     e_mean = 0.5 * (EPS_N + EPS_T)
     g_app = sapp * (e11n - e_mean) / EPS_N
+    if p.app_dg is not None:            # вклад нагрузки по МКЭ (fe/hill_table.json), как в ca_hydride
+        g_app = np.interp(sapp, *p.app_dg) * (np.sin(psi_map) ** 2 - 0.5)
     lnc_gorsky = p.v_h_over_rt * sapp / 3.0 if p.v_h_over_rt else 0.0
     S11 = np.zeros((ny, nx)); S22 = np.zeros_like(S11); S12 = np.zeros_like(S11); S33 = np.zeros_like(S11)
     occ = np.zeros((ny, nx), bool)

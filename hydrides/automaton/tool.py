@@ -71,16 +71,16 @@ class Model:
     B: float = 40.0                         # kin: барьер на линии TSSP, kT
     Delta0: float = 30.0                    # kin: избыток движущей силы на линии TSSP, МПа
     nu_c: float = 1e-6                      # kin: скорость зарождения в клетке на TSSP, 1/с
-    beta: float = 0.12                      # 1/МПа при T_ref
-    sigma_cap: float = 90.0                 # МПа при T_ref (эффективный, см. fe/README.md)
+    beta: float = 0.08                      # 1/МПа при T_ref (с упругим вкладом нагрузки, app="el", было 0.12)
+    sigma_cap: float = 240.0                # МПа при T_ref, ближнее поле (с app="el" было 90)
     capture_um: float = 35.0
     beta_mode: str = "const"                # "const" | "1/T"
     cap_mode: str = "const"                 # "const" | "sy"
     T_ref: float = 300.0                    # °C — средняя температура выпадения в калибровке
     cal_material: str = "Zry4_SR"           # материал калибровки (для cap_mode = "sy")
     cap_local_only: bool = True             # потолок только на ближнее поле; среднее напряжение в металле — без потолка
-    app: str = "el"                         # вклад нагрузки в выбор ориентации: "el" — упругий 0.36·σθ;
-                                            # "iso2d" — пластичность по МКЭ (fe/hill_table.json), с ним β 0.08, потолок 240
+    app: str = "iso2d"                      # вклад нагрузки в выбор ориентации: "iso2d" — пластичность по МКЭ
+                                            # (fe/hill_table.json, Δg ≈ σθ); "el" — упругий 0.36·σθ (с ним β 0.12, потолок 90)
 
 
 def _plates_arr(plates):
@@ -94,8 +94,6 @@ def simulate(mat: Material, tex: Texture, hist: History, model: Model = Model(),
                 chi0_profile=tuple(tex.chi0_profile), beta=model.beta, sigma_cap=model.sigma_cap,
                 capture_um=model.capture_um, E=mat.E, nu=mat.nu, seed=seed, cap_local_only=model.cap_local_only)
     if model.app != "el":
-        if model.engine != "seq":
-            raise NotImplementedError("пластический вклад нагрузки (Model.app) — только для engine='seq'")
         tab = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fe", "hill_table.json")))
         base["app_dg"] = tuple(tab[model.app])
     # 1. нерастворившиеся гидриды: исходная (окружная, без напряжения) структура при полном водороде,
