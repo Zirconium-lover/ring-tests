@@ -91,8 +91,10 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     # измеренный сдвиг температуры выпадения: нормальное напряжение на пластинке σ_nn = σθ·sin²ψ и фора зёрен
     # с осью c по радиусу (cos²ψ), в градусах; в движущую силу (МПа) — через наклон линии TSSP: n_H·Q/T
     dT_map = p.app_dT * sapp * np.sin(psi_map) ** 2 + p.bias_dT * np.cos(psi_map) ** 2
+    dTg = np.zeros(len(gpsi))
     if p.dT_s > 0:                      # свой генератор: зёрна и остальные случайные числа не меняются
-        dT_map = dT_map + np.random.default_rng([p.seed, 11]).normal(0.0, p.dT_s, len(gpsi))[grains]
+        dTg = np.random.default_rng([p.seed, 11]).normal(0.0, p.dT_s, len(gpsi))
+        dT_map = dT_map + dTg[grains]
     Q_over_R = np.log(10.0) * 1000.0 * L["TSSP"][1]
     if p.app_dT > 0:
         g_app = np.zeros_like(g_app)
@@ -110,7 +112,8 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         ngb = len(gcell)
         dTs = np.random.default_rng([p.seed, 7]).normal(0.0, p.gb_dT_s, len(uniq))[gpid] if p.gb_dT_s > 0 else 0.0
         sg = sapp.ravel()[gcell]
-        dT_gb = p.app_dT * sg * np.sin(gpsi_f) ** 2 + p.bias_dT * np.cos(gpsi_f) ** 2 + p.gb_dT + dTs
+        # разброс по зёрнам — и на грани: от зерна, с которым у гидрида соотношение ориентаций
+        dT_gb = p.app_dT * sg * np.sin(gpsi_f) ** 2 + p.bias_dT * np.cos(gpsi_f) ** 2 + p.gb_dT + dTs + dTg[gmatch]
         ge11, ge22, ge12 = eigen_components_for(gpsi_f)
         if p.app_dT > 0:
             g_app_gb = np.zeros(ngb)

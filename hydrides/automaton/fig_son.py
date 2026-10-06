@@ -20,8 +20,8 @@ for f in glob.glob(sys.argv[1] + "/*.json"):
     m = json.load(open(f))
     R[m["variant"]][int(m["sigma_app"])].append(m)
 VAR = [("viz5", BLUE, "фора зёрен 5 °C (Vizcaíno, Zr-2.5Nb) — без подгонки"),
-       ("viz5_s3", GREEN, "то же + разброс по зёрнам 3 °C"),
-       ("viz5_s6", VIOLET, "то же + разброс по зёрнам 6 °C"),
+       ("viz5_s2", GREEN, "то же + разброс по зёрнам 2 °C"),
+       ("viz5_s3", VIOLET, "то же + разброс по зёрнам 3 °C"),
        ("zry10.9", MUTED, "фора 10.9 °C (калибровка на Zry-4, Cinbiz)")]
 SON = {"CWSR": {0: 0.0, 83: 0.038, 96: 0.107, 146: 0.454}, "PRXA": {0: 0.0, 83: 0.115, 96: 0.263, 146: 0.540}}
 fig, axs = plt.subplots(1, 3, figsize=(18, 5.2), facecolor=BG)
