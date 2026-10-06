@@ -45,6 +45,11 @@ class KParams(Params):
     stress_diff: bool = False       # диффузия водорода и в растянутые области: c ∝ exp(V_H·σ_h/RT) в равновесии
     V_H: float = 1.7e-6             # парциальный мольный объём водорода в Zr, м³/моль
     sh_cap: float = 300.0           # ограничение гидростатического напряжения от соседей, МПа
+    app_dT: float = 0.0             # °C/МПа: сдвиг температуры выпадения на 1 МПа нормального к пластинке
+                                    # напряжения (Vizcaíno и др. 2014: 0.08 ± 0.02 в зёрнах с осью c вдоль нагрузки);
+                                    # > 0 — заменяет упругий вклад нагрузки (g_app) этим измеренным
+    bias_dT: float = 0.0            # °C: фора выпадения в зёрнах с осью c по радиусу (∝ cos²ψ) — плотность
+                                    # дислокаций зависит от ориентации зерна (Vizcaíno: 5 °C между семействами зёрен)
 
 
 def run_kinetic(p: KParams, verbose=False, callback=None):
@@ -65,6 +70,12 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     if p.app_dg is not None:            # вклад нагрузки по МКЭ (fe/hill_table.json), как в ca_hydride
         g_app = np.interp(sapp, *p.app_dg) * (np.sin(psi_map) ** 2 - 0.5)
     lnc_gorsky = p.v_h_over_rt * sapp / 3.0 if p.v_h_over_rt else 0.0
+    # измеренный сдвиг температуры выпадения: нормальное напряжение на пластинке σ_nn = σθ·sin²ψ и фора зёрен
+    # с осью c по радиусу (cos²ψ), в градусах; в движущую силу (МПа) — через наклон линии TSSP: n_H·Q/T
+    dT_map = p.app_dT * sapp * np.sin(psi_map) ** 2 + p.bias_dT * np.cos(psi_map) ** 2
+    Q_over_R = np.log(10.0) * 1000.0 * L["TSSP"][1]
+    if p.app_dT > 0:
+        g_app = np.zeros_like(g_app)
     S11 = np.zeros((ny, nx)); S22 = np.zeros_like(S11); S12 = np.zeros_like(S11); S33 = np.zeros_like(S11)
     occ = np.zeros((ny, nx), bool)
     hyd = np.zeros((ny, nx))
@@ -116,7 +127,8 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         if p.g_extra is not None:
             g = g + p.g_extra
         lnc = np.log(np.clip(c, 1e-6, None)) + lnc_gorsky
-        Delta = p.Delta0 + N_H_MPa_per_K * Tk * (lnc - np.log(c_line(T, L["TSSP"]))) + EPS_N * g
+        Delta = p.Delta0 + N_H_MPa_per_K * Tk * (lnc - np.log(c_line(T, L["TSSP"]))) + EPS_N * g \
+            + N_H_MPa_per_K * Q_over_R / Tk * dT_map
         ok = (Delta > 0) & ~occ & ~tried
         lnr = np.full((ny, nx), -np.inf)
         lnr[ok] = np.log(p.nu_c) - p.B * ((p.Delta0 / Delta[ok]) ** 2 - 1.0)
