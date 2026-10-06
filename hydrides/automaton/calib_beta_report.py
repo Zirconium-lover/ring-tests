@@ -15,7 +15,7 @@ def load(d):
     g = defaultdict(lambda: defaultdict(list))
     for f in glob.glob(d + "/*.json"):
         m = json.load(open(f))
-        g[(m["beta"], m["sigma_cap"], m.get("screen", False))][int(m["sigma_app"])].append(m)
+        g[(m["beta"], m["sigma_cap"], m.get("screen", False), m.get("app", "el"))][int(m["sigma_app"])].append(m)
     return g
 
 
@@ -38,6 +38,6 @@ if __name__ == "__main__":
     rows = table(sys.argv[1])
     for tot, eL, eC, k, s, img, pk, pl in rows:
         V = k[0] * 1e-6 * KT_600 / 0.072 * 1e27
-        print(f"β {k[0]:<5} потолок {k[1]:<5} экр {int(k[2])} V≈{V:4.0f} нм³ | ошибка {tot:.3f} (Lepine {eL:.3f}, Cinbiz {eC:.3f})")
+        print(f"β {k[0]:<5} потолок {k[1]:<5} экр {int(k[2])} {k[3]:8s} V≈{V:4.0f} нм³ | ошибка {tot:.3f} (Lepine {eL:.3f}, Cinbiz {eC:.3f})")
         print("    изобр:  " + " ".join(f"{q}:{img[q]:.2f}" for q in s))
         print("    Fn45:   " + " ".join(f"{q}:{pk[q]:.2f}" for q in s))

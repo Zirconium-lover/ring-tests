@@ -17,6 +17,7 @@ from ca_hydride import Params, run  # noqa: E402
 from ca_analysis import packet_metrics, render, hs  # noqa: E402
 
 SIG = [0, 100, 125, 150, 175, 200, 250]
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def image_measures(r):
@@ -49,7 +50,10 @@ def job(a):
     if os.path.exists(fn):
         return
     t0 = time.time()
-    r = run(Params(capture_um=35.0, cap_local_only=True, **kw))
+    kp = dict(kw)
+    if "app" in kp:            # таблица Δg(σθ) из МКЭ (fe/hill_table.json): el, iso2d, massih2d
+        kp["app_dg"] = tuple(json.load(open(os.path.join(HERE, "fe", "hill_table.json")))[kp.pop("app")])
+    r = run(Params(capture_um=35.0, cap_local_only=True, **kp))
     m = metrics(r)
     m.update(kw, time_s=time.time() - t0)
     np.savez_compressed(os.path.join(out, name + ".npz"),
