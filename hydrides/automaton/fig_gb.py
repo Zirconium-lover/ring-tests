@@ -1,5 +1,5 @@
 """Рис. 18: межзёренный канал в кинетическом движке — RHF, доля межзёренных (против Son и др. 2026),
-связность и снимок структуры. python fig_gb.py папка_без_границ папка_с_границами [σ снимка] [фора снимка]"""
+связность и снимок структуры. python fig_gb.py папка [σ снимка]"""
 import os
 import sys
 import json
@@ -20,27 +20,19 @@ BLUE, ORANGE, GREEN, VIOLET, INK, MUTED, BG, GRID = ("#2a78d6", "#eb6834", "#2f9
                                                      "#0b0b0b", "#52514e", "#fcfcfb", "#e4e2dc")
 plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10, "axes.edgecolor": MUTED, "axes.labelcolor": INK,
                      "xtick.color": MUTED, "ytick.color": MUTED})
-D0, D1 = sys.argv[1], sys.argv[2]
-S_SNAP = int(sys.argv[3]) if len(sys.argv) > 3 else 200
-G_SNAP = float(sys.argv[4]) if len(sys.argv) > 4 else 3.0
+D = sys.argv[1]
+S_SNAP = int(sys.argv[2]) if len(sys.argv) > 2 else 175
 runs = defaultdict(lambda: defaultdict(list))
-for d, gb in ((D0, False), (D1, True)):
-    for f in glob.glob(d + "/*.json"):
-        m = json.load(open(f))
-        if m.get("bias_dT") != 12.4 or m.get("sigma_cap") != 180.0 or m.get("dT_s", 0.0) != 0.0:
-            continue
-        key = ("gb", m["gb_dT"]) if m.get("gb") else ("intra", None)
-        if gb != (key[0] == "gb"):
-            continue
-        n = int(round(m.get("size_um", [240.0])[0] / m.get("dx", 0.4))) if isinstance(m.get("size_um"), list) else 600
-        P = np.load(f[:-5] + ".npz")["plates"]
-        c = metrics_of(P, (n, n), 0.4)
-        m.update({k: v for k, v in c.items() if k != "extents"})
-        runs[key][int(m["sigma_app"])].append(m)
-VAR = [(("intra", None), MUTED, "только в теле зерна"),
-       (("gb", 0.0), GREEN, "+ границы, фора 0"),
-       (("gb", 1.0), BLUE, "+ границы, фора 1 °C"),
-       (("gb", 3.0), ORANGE, "+ границы, фора 3 °C")]
+for f in glob.glob(D + "/*.json"):
+    m = json.load(open(f))
+    P = np.load(f[:-5] + ".npz")["plates"]
+    for g in (1.0, 3.0):
+        c = metrics_of(P, (600, 600), 0.4, gap_um=g)
+        m[f"L{g:.0f}"] = c["L_cluster_max"]
+    runs[(bool(m.get("gb", False)), bool(m.get("grow_kin", False)))][int(m["sigma_app"])].append(m)
+VAR = [((False, False), MUTED, "в теле зерна, фора зёрен 12.4 °C"),
+       ((True, False), BLUE, "+ границы: фора 1.5 °C, фора зёрен 10.9 °C"),
+       ((True, True), ORANGE, "+ рост во времени и переход через границы")]
 
 
 def curve(ax, key, field, **kw):
@@ -56,8 +48,9 @@ ax_img = fig.add_axes([0.83, 0.08, 0.17, 0.82])
 for k, c, lab in VAR:
     if k in runs:
         curve(axs[0], k, "Fn45_image", color=c, label=lab)
-        curve(axs[3], k, "L_cluster_max", color=c, label=lab)
-        if k[0] == "gb":
+        curve(axs[3], k, "L3", color=c, label=lab + ", зазор 3 мкм")
+        curve(axs[3], k, "L1", color=c, ls="--", alpha=0.6)
+        if k[0]:
             curve(axs[1], k, "GB_frac", color=c, label=lab)
             curve(axs[2], k, "GB_frac_rad", color=c, label=lab)
 x = np.linspace(0, 260, 300)
@@ -72,17 +65,16 @@ for ax in axs[1:3]:
     ax.set_ylim(0, 1.05)
 axs[1].set_title("доля длины межзёренных — все пластинки", loc="left", fontsize=10.5, color=INK)
 axs[2].set_title("доля межзёренных среди радиальных", loc="left", fontsize=10.5, color=INK)
-axs[3].set_title("самый длинный связный кластер, мкм", loc="left", fontsize=10.5, color=INK)
+axs[3].set_title("длиннейший кластер, мкм (пунктир: зазор 1 мкм)", loc="left", fontsize=10.5, color=INK)
 for ax in axs:
     ax.set_xlabel("окружное напряжение при охлаждении, МПа"); ax.set_xlim(-5, 260); ax.grid(color=GRID)
     ax.set_facecolor(BG)
-axs[0].legend(frameon=False, fontsize=8.5, loc="upper left")
+axs[0].legend(frameon=False, fontsize=8.5, loc="center left")
 axs[1].legend(frameon=False, fontsize=8.5, loc="lower right")
 # снимок: границы зёрен и пластинки, кусок 80 × 80 мкм
-f = [g for g in glob.glob(D1 + "/*.json") if json.load(open(g)).get("gb_dT") == G_SNAP
-     and int(json.load(open(g))["sigma_app"]) == S_SNAP and json.load(open(g))["seed"] == 1]
+f = sorted(glob.glob(D + f"/bias_dT10.9_gbTrue_gb_dT1.5_seed1_sigma_app{S_SNAP}.json"))
 if f:
-    m = json.load(open(f[0])); z = np.load(f[0][:-5] + ".npz")
+    z = np.load(f[0][:-5] + ".npz")
     p = KParams(seed=1)
     grains, gpsi, gbd = make_grains(p, np.random.default_rng(1), gb=True)
     ny, nx = grains.shape
@@ -97,10 +89,10 @@ if f:
         ax_img.plot([cx - half * tx, cx + half * tx], [cy - half * ty, cy + half * ty], lw=2.2,
                     color=ORANGE if kd == 1 else BLUE, solid_capstyle="butt")
     ax_img.set_xlim(0, 80); ax_img.set_ylim(80, 0); ax_img.set_xticks([]); ax_img.set_yticks([])
-    ax_img.set_title(f"{S_SNAP} МПа, фора границ {G_SNAP:g} °C: межзёренные — оранжевые,\nв теле зерна — синие; "
+    ax_img.set_title(f"{S_SNAP} МПа, с границами: межзёренные — оранжевые,\nв теле зерна — синие; "
                      f"по горизонтали TD, 80 мкм", loc="left", fontsize=9, color=INK)
 fig.suptitle("Межзёренный канал зарождения: пластинка вдоль грани, след грани в пределах 15° от базисного следа "
-             "одного из соседей (Qin 2011, Son 2026); фора зёрен 12.4 °C, сдвиг 0.08 °C/МПа", x=0.01, ha="left",
+             "одного из соседей (Qin 2011, Son 2026); сдвиг 0.08 °C/МПа (Vizcaíno 2014)", x=0.01, ha="left",
              fontsize=12, color=INK)
 fig.savefig(os.path.join(HERE, "figs", "fig18_gb.png"), dpi=100, facecolor=BG, bbox_inches="tight")
 for k, _, lab in VAR:
@@ -108,6 +100,6 @@ for k, _, lab in VAR:
         continue
     s = sorted(runs[k])
     print(lab)
-    for fld in ("RHF_image", "Fn45_image", "GB_frac", "GB_frac_rad", "GB_frac_circ", "L_cluster_max", "RHCF", "HCC_rad_mean", "RHCP"):
+    for fld in ("RHF_image", "Fn45_image", "GB_frac", "GB_frac_rad", "GB_frac_circ", "L1", "L3"):
         if fld in runs[k][s[0]][0]:
             print(f"  {fld:14s}" + " ".join(f"{q}:{np.nanmean([m[fld] for m in runs[k][q]]):.2f}" for q in s))
