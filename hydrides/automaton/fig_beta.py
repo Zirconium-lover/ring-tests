@@ -1,5 +1,6 @@
 """Рис. 15: перекалибровка β и потолка ближнего поля (2D) — RHF по изображению против Lepine и доля длины
-под 45–135° против ступеньки Cinbiz 2016. python fig_beta.py папка [папка ...]"""
+под 45–135° против ступеньки Cinbiz 2016; рис. 16 (--plast) — то же с пластическим вкладом нагрузки из МКЭ.
+python fig_beta.py [--plast] папка [папка ...]"""
 import os
 import sys
 import json
@@ -15,13 +16,20 @@ BLUE, ORANGE, GREEN, VIOLET, INK, MUTED, BG, GRID = ("#2a78d6", "#eb6834", "#2f9
                                                      "#0b0b0b", "#52514e", "#fcfcfb", "#e4e2dc")
 plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10, "axes.edgecolor": MUTED, "axes.labelcolor": INK,
                      "xtick.color": MUTED, "ytick.color": MUTED})
+PLAST = "--plast" in sys.argv
 runs = defaultdict(lambda: defaultdict(list))
-for d in sys.argv[1:]:
+for d in [a for a in sys.argv[1:] if a != "--plast"]:
     for f in glob.glob(d + "/*.json"):
         m = json.load(open(f))
-        runs[(m["beta"], m["sigma_cap"], bool(m.get("screen", False)))][int(m["sigma_app"])].append(m)
-VAR = [((0.12, 90.0, False), BLUE, "β 0.12, потолок 90 (остаётся)"), ((0.6, 90.0, False), ORANGE, "β 0.6, потолок 90"),
-       ((0.6, 220.0, False), VIOLET, "β 0.6, потолок 220"), ((0.3, 90.0, True), GREEN, "β 0.3, потолок 90, экранирование по МКЭ")]
+        runs[(m["beta"], m["sigma_cap"], bool(m.get("screen", False)), m.get("app", "el"))][int(m["sigma_app"])].append(m)
+VAR = [((0.12, 90.0, False, "el"), BLUE, "β 0.12, потолок 90 (остаётся)"), ((0.6, 90.0, False, "el"), ORANGE, "β 0.6, потолок 90"),
+       ((0.6, 220.0, False, "el"), VIOLET, "β 0.6, потолок 220"), ((0.3, 90.0, True, "el"), GREEN, "β 0.3, потолок 90, экранирование по МКЭ")]
+if PLAST:
+    VAR = [((0.12, 90.0, False, "el"), MUTED, "упругий наклон: β 0.12, потолок 90"),
+           ((0.08, 180.0, False, "iso2d"), ORANGE, "пластический: β 0.08, потолок 180"),
+           ((0.08, 240.0, False, "iso2d"), BLUE, "пластический: β 0.08, потолок 240"),
+           ((0.08, 300.0, False, "iso2d"), VIOLET, "пластический: β 0.08, потолок 300"),
+           ((0.2, 240.0, False, "iso2d"), GREEN, "пластический: β 0.2, потолок 240")]
 cinbiz = lambda s: 1.0 / (1.0 + np.exp(-np.log(19.0) / 15.0 * (s - 160.0)))
 fig, axs = plt.subplots(1, 2, figsize=(14, 5.2), facecolor=BG)
 for ax, key, title in ((axs[0], "RHF_image", "RHF по изображению (как у Lepine)"),
@@ -45,7 +53,11 @@ for ax, key, title in ((axs[0], "RHF_image", "RHF по изображению (�
     ax.set_xlim(-5, 260); ax.grid(color=GRID)
     ax.set_title(title, loc="left", fontsize=10.5, color=INK)
     ax.legend(frameon=False, fontsize=8.5, loc="upper left")
-fig.suptitle("Перекалибровка β и потолка ближнего поля (2D, ℓ 35 мкм, две затравки): у модели переход пологий и начинается с 25–50 МПа, порога нет",
-             x=0.01, ha="left", fontsize=12, color=INK)
-fig.savefig(os.path.join(HERE, "figs", "fig15_beta.png"), dpi=100, facecolor=BG, bbox_inches="tight")
+if PLAST:
+    fig.suptitle("Пластический вклад нагрузки (Δg ≈ σθ по МКЭ): место перехода задаёт потолок ближнего поля, крутизну β не меняет",
+                 x=0.01, ha="left", fontsize=12, color=INK)
+else:
+    fig.suptitle("Перекалибровка β и потолка ближнего поля (2D, ℓ 35 мкм, две затравки): у модели переход пологий и начинается с 25–50 МПа, порога нет",
+                 x=0.01, ha="left", fontsize=12, color=INK)
+fig.savefig(os.path.join(HERE, "figs", "fig16_plast.png" if PLAST else "fig15_beta.png"), dpi=100, facecolor=BG, bbox_inches="tight")
 print("ok")
