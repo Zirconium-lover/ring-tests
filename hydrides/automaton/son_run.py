@@ -27,6 +27,7 @@ VARIANTS = {
     "viz5_grow": dict(bias_dT=5.0, grow_kin=True, cross_tol=15.0),
     "viz5_s2": dict(bias_dT=5.0, dT_s=2.0),         # разброс форы по зёрнам (и граням — от зерна с соотношением)
     "viz5_s3": dict(bias_dT=5.0, dT_s=3.0),
+    "viz5_s2c360": dict(bias_dT=5.0, dT_s=2.0, sigma_cap=360.0),   # разброс + сильнее притяжение колоды
 }
 SON_CWSR = {0: 0.0, 83: 0.038, 96: 0.107, 146: 0.454}
 SON_PRXA = {0: 0.0, 83: 0.115, 96: 0.263, 146: 0.540}
@@ -47,6 +48,9 @@ def job(a):
     rad = np.array([abs(np.sin(q["psi"])) >= np.sin(np.radians(45)) for q in new], bool)
     m["GB_frac"] = float(L[gbk].sum() / L.sum()) if len(L) else np.nan
     m["GB_frac_rad"] = float(L[gbk & rad].sum() / L[rad].sum()) if rad.any() else np.nan
+    dev = np.degrees(np.abs(np.arctan(np.tan([q["psi"] for q in new])))) if new else np.zeros(0)
+    for th in (60, 70, 80):             # доля длины пластинок круче th — для сравнения со строгой классификацией
+        m[f"RHF{th}_plates"] = float((L * (dev >= th)).sum() / L.sum()) if len(L) else np.nan
     m["T_first"] = new[0]["T"] if new else np.nan
     m["n_init"] = sum(1 for q in r["plates"] if q.get("init"))
     m.update(variant=var, sigma_app=sig, seed=seed, time_s=time.time() - t0, **VARIANTS[var])
