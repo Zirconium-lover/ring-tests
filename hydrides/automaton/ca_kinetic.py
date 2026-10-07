@@ -77,7 +77,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     else:
         grains, gpsi = make_grains(p, rng)
     ny, nx = grains.shape
-    el = Elastic((ny, nx), p.dx, p.E, p.nu)
+    el = Elastic((ny, nx), p.dx, p.E, p.nu, free_z=p.free_z)
     psi_map = gpsi[grains]
     e11n, e22n, e12n = eigen_components_for(psi_map)
     e33n = EPS_T

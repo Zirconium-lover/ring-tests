@@ -3,7 +3,8 @@ g = σ:ε*/ε_n считается упругой микроупругостью
 подточкам) и обрезается потолком ±σ_cap. Здесь то же поле для трёх выпавших пластинок колоды или цепочки
 (без нагрузки) сравнивается с упругим и упругопластическим МКЭ (stack_fe.py, случаи *_0_el и *_0) — в матрице
 и в местах, где сядет следующая пластинка: продолжение колоды (t, n) = (2.5, 1.2) и цепочки (5.8, 0.6) мкм,
-средним по площади этой будущей пластинки.
+средним по площади этой будущей пластинки. Автомат — с free_z (σ̄_zz = 0, как в МКЭ); прежняя плоская
+деформация (ε_zz = 0) даёт однородный сдвиг offset_plane_strain.
 python stack_auto.py папка_мкэ"""
 import os
 import sys
@@ -41,10 +42,10 @@ def frac_rect(dx, ct, cn, sub=3):
     return fr / sub ** 2
 
 
-def auto_g(conf, dx):
+def auto_g(conf, dx, free_z=True):
     n, (T, N) = grid(dx)
     fr = sum(frac_rect(dx, ct, cn) for ct, cn in plates_of(conf))
-    el = Elastic((n, n), dx, 90e3, 0.34)
+    el = Elastic((n, n), dx, 90e3, 0.34, free_z=free_z)
     S11, S22, S12, S33 = el.stress(EPS_T * fr, EPS_N * fr, 0.0 * fr, EPS_T * fr)
     g = (EPS_T * S11 + EPS_N * S22 + EPS_T * S33) / EPS_N
     return T, N, fr, g
@@ -77,7 +78,8 @@ if __name__ == "__main__":
             ge = fe_g(fe_e, T, N) if fe_e is not None else np.full_like(g, np.nan)
             dist = ndi.distance_transform_edt(fr < 0.01) * dx
             near = (dist > 0.15) & (dist < 1.0) & np.isfinite(gp)
-            res[dx] = dict(site_auto=site_mean(T, N, g, conf), site_auto_cap=site_mean(T, N, np.clip(g, -CAP, CAP), conf),
+            g_ps = auto_g(conf, dx, free_z=False)[3]                      # прежняя плоская деформация
+            res[dx] = dict(offset_plane_strain=float(np.mean(g_ps - g)), site_auto=site_mean(T, N, g, conf), site_auto_cap=site_mean(T, N, np.clip(g, -CAP, CAP), conf),
                            site_fe_el=site_mean(T, N, ge, conf), site_fe_pl=site_mean(T, N, gp, conf),
                            rms_auto_vs_fe_el=float(np.sqrt(np.nanmean((g - ge)[near] ** 2))),
                            rms_auto_vs_fe_pl=float(np.sqrt(np.nanmean((g - gp)[near] ** 2))),

@@ -7,7 +7,7 @@ from collections import defaultdict
 import numpy as np
 from calib_beta_report import LEP, cinbiz
 
-KEYS = ("bias_dT", "app_dT", "B", "Delta0", "sigma_cap", "gb", "gb_dT", "grow_kin", "dT_s")
+KEYS = ("bias_dT", "app_dT", "B", "Delta0", "sigma_cap", "gb", "gb_dT", "grow_kin", "dT_s", "free_z")
 
 
 def table(d):

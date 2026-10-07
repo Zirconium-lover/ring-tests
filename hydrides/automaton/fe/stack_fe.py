@@ -270,6 +270,18 @@ def run_case(work_dir, name, threads=1, mesh_kw=None):
     fn = os.path.join(work_dir, name + ".json")
     if os.path.exists(fn):
         return json.load(open(fn))
+    lock = os.path.join(work_dir, name + ".lock")                # несколько очередей на одну папку
+    try:
+        os.close(os.open(lock, os.O_CREAT | os.O_EXCL))
+    except FileExistsError:
+        return None
+    try:
+        return _run_case(work_dir, name, fn, conf, orient, lk, Eh, plastic, threads, mesh_kw)
+    finally:
+        os.remove(lock)
+
+
+def _run_case(work_dir, name, fn, conf, orient, lk, Eh, plastic, threads, mesh_kw):
     t0 = time.time()
     nodes, Q, own = mesh_cell(plates_of(conf), **(mesh_kw or {}))
     Sig = case_load(orient, lk)
@@ -319,5 +331,8 @@ if __name__ == "__main__":
     thr = int(sys.argv[3]) if len(sys.argv) > 3 else 1
     for nm in sys.argv[2].split(","):
         r = run_case(out, nm, thr)
+        if r is None:
+            print(nm, "считается другой очередью", flush=True)
+            continue
         print(nm, "g", round(r["g"], 1), "W_old", r["W_old"] and round(r["W_old"], 2), "элементов", r["n_elem"],
               "время", round(r["time_s"]), flush=True)

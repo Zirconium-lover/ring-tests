@@ -65,6 +65,9 @@ class Params:
     init_plates: object = None        # пластинки, оставшиеся с прошлого цикла (не растворились): [(cy, cx, ψ, полудлина), ...]
     schedule: object = None           # schedule(progress 0..1) → dict(T, beta, sigma_cap, sigma_app, g_extra) — ход охлаждения
     cap_local_only: bool = False      # потолок только на ближнее поле; среднее напряжение в металле — без потолка
+    free_z: bool = False              # обобщённая плоская деформация: среднее ε_zz = среднему ε*_zz (σ̄_zz = 0);
+                                      # False — ε_zz = 0, от осевого несоответствия гидрида остаётся однородное
+                                      # сжатие σ̄ = −λ⟨ε*_zz⟩ в плоскости и −(λ + 2μ)⟨ε*_zz⟩ по оси (fe/stack_auto.py)
     screen: bool = False              # экранирование приложенного напряжения у гидридов (пластическая зона, МКЭ)
     screen_scale: float = 1.0         # масштаб расстояний профиля экранирования (1 — как у пластинки 5 × 0.6 мкм в МКЭ)
     screen_d: tuple = (0.0, 0.75, 1.25, 1.75, 2.5, 3.5)        # расстояние до гидрида, мкм
@@ -124,8 +127,9 @@ def make_grains(p, rng, gb=False):
 class Elastic:
     """Поле напряжений от собственных деформаций в периодической ячейке, плоская деформация."""
 
-    def __init__(self, shape, dx, E, nu):
+    def __init__(self, shape, dx, E, nu, free_z=False):
         self.shape = shape
+        self.free_z = free_z
         self.mu = E / (2 * (1 + nu))
         self.lam = E * nu / ((1 + nu) * (1 - 2 * nu))
         self.nu = nu
@@ -159,13 +163,14 @@ class Elastic:
         E11 = np.fft.irfft2(eps11, s=self.shape)
         E22 = np.fft.irfft2(eps22, s=self.shape)
         E12 = np.fft.irfft2(eps12, s=self.shape)
-        # средняя деформация = средней собственной (свободное макрорасширение): σ̄ = 0
+        # средняя деформация в плоскости = средней собственной (свободное макрорасширение); σ̄ = 0 при free_z
         E11 += e11.mean(); E22 += e22.mean(); E12 += e12.mean()
-        ekk = E11 + E22 - tr
+        E33 = float(np.mean(e33)) if self.free_z else 0.0          # иначе ε_zz = 0 (плоская деформация)
+        ekk = E11 + E22 + E33 - tr
         S11 = lam * ekk + 2 * mu * (E11 - e11)
         S22 = lam * ekk + 2 * mu * (E22 - e22)
         S12 = 2 * mu * (E12 - e12)
-        S33 = lam * ekk + 2 * mu * (0.0 - e33)
+        S33 = lam * ekk + 2 * mu * (E33 - e33)
         return S11, S22, S12, S33
 
 
@@ -244,7 +249,7 @@ def run(p: Params, verbose=False, callback=None):
     rng = np.random.default_rng(p.seed)
     grains, gpsi = make_grains(p, rng)
     ny, nx = grains.shape
-    el = Elastic((ny, nx), p.dx, p.E, p.nu)
+    el = Elastic((ny, nx), p.dx, p.E, p.nu, free_z=p.free_z)
     psi_map = gpsi[grains]
     e11n, e22n, e12n = eigen_components_for(psi_map)
     e33n = EPS_T
