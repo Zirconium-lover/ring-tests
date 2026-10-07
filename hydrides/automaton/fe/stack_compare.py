@@ -59,6 +59,10 @@ def compare(fz, cz, orient):
     band = (dist > 0.15) & np.isfinite(c["h"])
     near = band & (dist < 1.0)
     st = {}
+    STEP = {"deck": (2.5, 1.2), "chain": (5.8, 0.6)}
+    for conf, (a, b) in STEP.items():                      # g, средняя по месту следующей пластинки колоды/цепочки
+        site = (np.abs(T - a) < 2.5) & (np.abs(N - b) < 0.3) & ~f["hyd"]
+        st["site_" + conf] = (float(np.mean(f["g"][site])), float(np.nanmean(c["g"][site])))
     for k in ("h", "g", "nn"):
         dlt = f[k] - c[k]
         st[k] = dict(rms_near=float(np.sqrt(np.mean(dlt[near] ** 2))), max_near=float(np.abs(dlt[near]).max()),
@@ -73,10 +77,12 @@ def line(f, c, T, N, conf):
     if conf == "deck":
         i = int(round((-1.25 + L / 2) / h - 0.5))
         sel = (N[i] > -3.2) & (N[i] < 1.6)
-        return N[i][sel], f["g"][i][sel], c["g"][i][sel], f["h"][i][sel], c["h"][i][sel], "n, мкм (t = −1.25)"
+        m = sel & ~f["hyd"][i]
+        return N[i][m], f["g"][i][m], c["g"][i][m], f["h"][i][m], c["h"][i][m], "n, мкм (t = −1.25), гидрид исключён"
     j = int(round((-0.25 + L / 2) / h - 0.5))
     sel = (T[:, j] > -6.0) & (T[:, j] < 1.0)
-    return T[:, j][sel], f["g"][:, j][sel], c["g"][:, j][sel], f["h"][:, j][sel], c["h"][:, j][sel], "t, мкм (n = −0.25)"
+    m = sel & ~f["hyd"][:, j]
+    return T[:, j][m], f["g"][:, j][m], c["g"][:, j][m], f["h"][:, j][m], c["h"][:, j][m], "t, мкм (n = −0.25), гидрид исключён"
 
 
 if __name__ == "__main__":
@@ -85,8 +91,10 @@ if __name__ == "__main__":
     rows = {}
     for fn in sorted(glob.glob(os.path.join(DC, "*.json"))):
         cm = json.load(open(fn))
+        if "conf" not in cm:
+            continue
         key = f"{cm['conf']}_{cm['orient']}_{cm['load']}"
-        if cm.get("Eh", 1.0) != 1.0:
+        if cm.get("Eh", 1.0) != 1.0 or not cm.get("plastic", True):
             continue
         ff = glob.glob(os.path.join(DF, key + "_h0.1_fe.json"))
         fm = json.load(open(ff[0])) if ff else None
@@ -129,14 +137,17 @@ if __name__ == "__main__":
         r["field"] = st
         print(f"{k:18s} поля в 0.15–1 мкм от гидрида: σ_h Δrms {st['h']['rms_near']:5.1f} (масштаб {st['h']['scale_near']:5.0f}),"
               f" g Δrms {st['g']['rms_near']:5.1f} (масштаб {st['g']['scale_near']:5.0f}), макс |Δg| {st['g']['max_near']:5.0f};"
-              f" дальше: g Δrms {st['g']['rms_all']:5.1f}")
+              f" дальше: g Δrms {st['g']['rms_all']:5.1f}; g на месте следующей: колода {st['site_deck'][0]:.0f} / {st['site_deck'][1]:.0f},"
+              f" цепочка {st['site_chain'][0]:.0f} / {st['site_chain'][1]:.0f}")
     json.dump(dict(rows=rows, derived={k: list(v) for k, v in der.items()}),
               open(os.path.join(DC, "compare.json"), "w"), indent=1, default=float)
     # рисунок: карты g_next Фурье / МКЭ / разность для колоды и цепочки (радиальные, U110) и профили
-    show = [k for k in ("deck_rad_U110", "chain_rad_U110") if k in fields]
+    show = [k for k in ("deck_rad_U110", "chain_rad_U110", "deck_circ_U110", "chain_circ_U110") if k in fields][:2]
     if not show:
         sys.exit()
-    fig, axs = plt.subplots(len(show), 4, figsize=(21, 4.6 * len(show)), facecolor=BG, squeeze=False)
+    from matplotlib.colors import TwoSlopeNorm
+    fig, axs = plt.subplots(len(show), 4, figsize=(22, 3.9 * len(show)), facecolor=BG, squeeze=False,
+                            gridspec_kw=dict(width_ratios=[1.25, 1.25, 1.25, 1.0]))
     for row, k in zip(axs, show):
         f, c, T, N = fields[k]
         conf = k.split("_")[0]
@@ -146,12 +157,13 @@ if __name__ == "__main__":
         sub = lambda a: a[ti[0]:ti[-1] + 1, ni[0]:ni[-1] + 1].T
         fg = np.where(f["hyd"], np.nan, f["g"])
         for ax, a, ttl in ((row[0], fg, "Фурье, шаг 0.1 мкм"), (row[1], c["g"], "МКЭ (CalculiX)")):
-            im = ax.imshow(sub(a), origin="lower", extent=ext, cmap="RdBu_r", vmin=-400, vmax=400, aspect="equal")
+            im = ax.imshow(sub(np.where(f["hyd"], np.nan, a)), origin="lower", extent=ext, cmap="RdBu_r",
+                           norm=TwoSlopeNorm(0.0, -1500.0, 500.0), aspect="equal")
             ax.contour(sub(f["hyd"].astype(float)), [0.5], colors=INK, linewidths=0.8, extent=ext)
             ax.set_title(f"{k}: g следующей, {ttl}", loc="left", fontsize=10, color=INK)
         plt.colorbar(im, ax=row[1], fraction=0.03, label="МПа")
         d = np.where(f["hyd"], np.nan, f["g"] - c["g"])
-        im = row[2].imshow(sub(d), origin="lower", extent=ext, cmap="PuOr", vmin=-60, vmax=60, aspect="equal")
+        im = row[2].imshow(sub(d), origin="lower", extent=ext, cmap="PuOr", vmin=-100, vmax=100, aspect="equal")
         row[2].contour(sub(f["hyd"].astype(float)), [0.5], colors=INK, linewidths=0.8, extent=ext)
         row[2].set_title("Фурье − МКЭ", loc="left", fontsize=10, color=INK)
         plt.colorbar(im, ax=row[2], fraction=0.03, label="МПа")
