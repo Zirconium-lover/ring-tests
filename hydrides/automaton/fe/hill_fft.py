@@ -171,13 +171,14 @@ class Plate:
         self.E = np.zeros(6)
         self.ep = np.zeros((6, N)); self.p = np.zeros(N)
         self.N = N
+        self.eig0 = 0.0                 # уже выпавшие пластинки: постоянная собственная деформация (поле 6 × N)
 
     def eps_of(self, u, E):
         return E[:, None] + self.c.grad(u).reshape(6, self.N)
 
     def solve(self, Sig, t, tol=1e-7, tol_s=0.01, maxit=40, verbose=False):
         c = self.c
-        eig = t * self.eig
+        eig = self.eig0 + t * self.eig
         for it in range(maxit):
             eps = self.eps_of(self.u, self.E)
             sig, idx, Kt, dp, dep = c.constitutive(eps, self.ep, self.p, eig, self.matrix)
