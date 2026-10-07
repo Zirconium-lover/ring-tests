@@ -101,11 +101,13 @@ def _plates_arr(plates):
 
 
 def simulate(mat: Material, tex: Texture, hist: History, model: Model = Model(), size_um=(240.0, 240.0),
-             seed=1, dx=0.4, metrics=True, cache=None):
+             seed=1, dx=0.4, metrics=True, cache=None, plate=None):
+    """plate — размеры пластинки, если не по умолчанию: dict(h_um=..., L_min=..., L_max=...)."""
     th = Cooling(hist.H_ppm, hist.T_max, hist.T_end, mat.tss)
     base = dict(size_um=tuple(size_um), dx=dx, grain_um=tuple(tex.grain_um), chi0=tex.chi0, chi_s=tex.chi_s,
                 chi0_profile=tuple(tex.chi0_profile), beta=model.beta, sigma_cap=model.sigma_cap,
                 capture_um=model.capture_um, E=mat.E, nu=mat.nu, seed=seed, cap_local_only=model.cap_local_only)
+    base.update(plate or {})
     if model.app != "el":
         tab = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fe", "hill_table.json")))
         base["app_dg"] = tuple(tab[model.app])
@@ -115,7 +117,8 @@ def simulate(mat: Material, tex: Texture, hist: History, model: Model = Model(),
     if th.frac_left > 1e-5:
         key = None
         if cache:
-            key = os.path.join(cache, f"pre_{mat.tss}_chi{tex.chi0}_{'-'.join(map(str, tex.chi0_profile))}_H{hist.H_ppm:g}_s{seed}.npz")
+            geo = f"g{tex.grain_um[0]:g}x{tex.grain_um[1]:g}_L{size_um[0]:g}_dx{dx:g}_h{base.get('h_um', 0.6):g}"
+            key = os.path.join(cache, f"pre_{mat.tss}_chi{tex.chi0}_{'-'.join(map(str, tex.chi0_profile))}_H{hist.H_ppm:g}_{geo}_s{seed}.npz")
         if key and os.path.exists(key):
             P0 = np.load(key)["plates"]
         else:
@@ -123,7 +126,7 @@ def simulate(mat: Material, tex: Texture, hist: History, model: Model = Model(),
             P0 = _plates_arr(r0["plates"])
             if key:
                 np.savez_compressed(key, plates=P0)
-        area = np.cumsum(2 * P0[:, 3] * 0.6) / (size_um[0] * size_um[1])
+        area = np.cumsum(2 * P0[:, 3] * base.get("h_um", 0.6)) / (size_um[0] * size_um[1])
         init = P0[: max(1, int(np.searchsorted(area, th.frac_left)))]
     if model.engine == "kin":
         kp = KParams(**{k: v for k, v in base.items() if k not in ("beta", "capture_um")},
