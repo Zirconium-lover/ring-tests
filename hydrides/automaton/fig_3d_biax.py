@@ -68,4 +68,4 @@ for b in bb:
     print(f"σz/σθ = {b}")
     for k in ("RHF_rt", "RHF_rz", "RHF_surf", "frac_nTD", "frac_nND", "frac_nL", "T_first", "n_plates", "time_s"):
         print(f"  {k:9s}" + " ".join(f"{q}:{mean(b, q, k):.2f}" for q in s))
-    print("  порог RHF_rt=0.5:", round(crossing(b, "RHF_rt", 0.5)), " поверхность 0.1:", round(crossing(b, "RHF_surf", 0.1)))
+    print(f"  порог RHF_rt=0.5: {crossing(b, 'RHF_rt', 0.5):.0f}   поверхность 0.1: {crossing(b, 'RHF_surf', 0.1):.0f}")
