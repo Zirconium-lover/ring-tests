@@ -10,7 +10,9 @@
 Пластинка в центре ячейки, нормаль по y (оси ячейки = оси пластинки: x — t, y — n), длина 2a, толщина 0.6 мкм.
 Нагрузка — окружное σθ под углом α к нормали пластинки (α = 0 — радиальная пластинка, 90° — окружная) и
 осевое σz: σ_tt = σθ sin²α, σ_nn = σθ cos²α, σ_tn = σθ sin α cos α. Обобщённая плоская деформация.
-python halo_runs.py папка случай[,случай...] [процессов]   (случай = a2.5_al0_U110: полудлина, угол, нагрузка)"""
+Ячейка 30 мкм, для коротких пластинок (a ≤ 1.25 мкм) — 15 мкм. Нагрузка — из hill_runs.LOADS или U<σθ>.
+python halo_runs.py папка случай[,случай...] [процессов]   (случай = a2.5_al0_U110: полудлина, угол, нагрузка)
+python halo_runs.py папка таблица [процессов]   — вся таблица для автомата (A_TAB × AL_TAB × S_TAB)"""
 import os
 import sys
 import json
@@ -21,7 +23,18 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hill_fft as hf  # noqa: E402
 from hill_runs import LOADS  # noqa: E402
 
-L_CELL, H, TH = 30.0, 0.1, 0.6
+H, TH = 0.1, 0.6
+A_TAB = (0.6, 0.9, 1.25, 1.75, 2.5)
+AL_TAB = (0, 30, 60, 90)
+S_TAB = (75, 125, 175, 250)
+
+
+def cell_of(a):
+    return 15.0 if a <= 1.25 else 30.0
+
+
+def load_of(lk):
+    return LOADS[lk] if lk in LOADS else (float(lk[1:]), 0.0)
 
 
 def parse(case):
@@ -37,11 +50,12 @@ def job(args):
     a, al, lk = parse(case)
     t0 = time.time()
     hf.WORKERS = 1
+    L_CELL = cell_of(a)
     n = int(round(L_CELL / H))
     c = hf.Cell((n, n, 1), H)
     mask = hf.rect_mask((n, n, 1), H, a, TH, 1)
     pl = hf.Plate(c, mask, hf.misfit(1))
-    sth, sz = LOADS[lk]
+    sth, sz = load_of(lk)
     r = np.radians(al)
     Sig = [sth * np.sin(r) ** 2, sth * np.cos(r) ** 2, sz, 0.0, 0.0, np.sqrt(2) * sth * np.sin(r) * np.cos(r)]
     hist = pl.run(Sig, nt=10)
@@ -60,6 +74,9 @@ if __name__ == "__main__":
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
     cases = sys.argv[2].split(",")
+    if sys.argv[2] == "таблица":
+        cases = [f"a{a:g}_al0_0" for a in A_TAB] + [f"a{a:g}_al{al}_U{s}" for a in A_TAB for s in S_TAB for al in AL_TAB]
+        cases.sort(key=lambda c: -parse(c)[0])                  # длинные (дорогие) — первыми
     with Pool(int(sys.argv[3]) if len(sys.argv) > 3 else 1) as pool:
         list(pool.imap_unordered(job, [(out, c) for c in cases]))
     print("готово", len(cases))

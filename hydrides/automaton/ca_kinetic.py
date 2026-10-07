@@ -63,6 +63,10 @@ class KParams(Params):
     # (k_tip = 1 — предел по диффузии к кончику радиусом h/2; рост медленнее — k_tip < 1, как в HNGD)
     grow_kin: bool = False
     k_tip: float = 0.05
+    halo: bool = False              # пластические ореолы пластинок (halo.py, таблица из fe/halo_runs.py) в упругом
+                                    # Фурье вместо обрезки поля соседей; sigma_cap тогда — только предохранитель
+    halo_step: float = 0.1          # мкм: ореол растущей пластинки обновляется, когда полудлина изменилась на столько
+    halo_tab: str = ""              # путь к таблице ореолов (пусто — data_halo/halo_tab.npz)
     cross_tol: float = 0.0          # град: упёршись в границу, кончик продолжается в соседнем зерне (или на
                                     # соседней грани), если след там отличается не больше (Fang 2017, Son 2026); 0 — нет
 
@@ -78,6 +82,12 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         grains, gpsi = make_grains(p, rng)
     ny, nx = grains.shape
     el = Elastic((ny, nx), p.dx, p.E, p.nu, free_z=p.free_z)
+    if p.halo:
+        from halo import HaloTable
+        kw_h = dict(path=p.halo_tab) if p.halo_tab else {}
+        ht = HaloTable(**kw_h); ht.set_load(p.sigma_app)
+        ht0 = HaloTable(**kw_h); ht0.set_load(0.0)            # нерастворившиеся пластинки прошлого цикла — без нагрузки
+    halos = {}                                          # номер пластинки → (строки, столбцы, компоненты, полудлина)
     psi_map = gpsi[grains]
     e11n, e22n, e12n = eigen_components_for(psi_map)
     e33n = EPS_T
@@ -273,9 +283,30 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     kx = 2 * np.pi * np.fft.rfftfreq(nx, p.dx)[None, :]
     k2 = kx ** 2 + ky ** 2
 
-    def add_batch(batch, deplete=True):
-        """Пластинки одного шага: одно решение упругой задачи на всех, водород — из ячеек пластинок."""
+    def halo_update(pids, table=None):
+        """Ореолы пластинок pids (новых или подросших на halo_step): прежний вычитается, новый — по текущей
+        длине; возвращает добавки собственной деформации для add_batch."""
+        out = []
+        for pid in pids:
+            q_ = plates[pid]
+            old = halos.get(pid)
+            if q_["half"] < 0.25 or (old is not None and abs(q_["half"] - old[3]) < p.halo_step):
+                continue
+            if old is not None:
+                out.append((old[0], old[1], old[2], -1.0))
+            ys, xs, comps = (table or ht).patch((ny, nx), p.dx, q_["c"], q_["psi"], q_["half"])
+            halos[pid] = (ys, xs, comps, q_["half"])
+            out.append((ys, xs, comps, 1.0))
+        return out
+
+    def add_batch(batch, deplete=True, extra=None):
+        """Пластинки одного шага: одно решение упругой задачи на всех, водород — из ячеек пластинок;
+        extra — добавки собственной деформации (ореолы): (строки, столбцы, компоненты, знак)."""
         Ein = [np.zeros((ny, nx)) for _ in range(4)]
+        for ys, xs, comps, sgn in (extra or ()):
+            sel = np.ix_(ys, xs)
+            for a, v in zip(Ein, comps):
+                a[sel] += sgn * v
         sink = np.zeros((ny, nx))
         for c, psi, half in batch:
             ys, xs, fr, comps = plate_eigen((ny, nx), p.dx, c, psi, half, p.h_um)
@@ -303,6 +334,8 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
             if p.grow_kin:
                 claim(cc, psi, half, len(plates) - 1)
                 new_tip(len(plates) - 1, cc - half * tvec(psi), cc + half * tvec(psi), psi, "intra", grains[iy, ix])
+        if p.halo:
+            add_batch([], deplete=False, extra=halo_update(range(len(plates)), ht0))
     T, t = p.T_max, 0.0
     q = p.rate / 60.0                                   # °C/с
     hist = dict(t=[], T=[], c_mean=[], n=[], frac=[])
@@ -363,6 +396,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
             idx = rng.choice(pr.size, size=n_new, p=pr)
             batch = []
             occ_b = occ.copy()
+            n_before = len(plates)
             for k in rng.permutation(idx):
                 kgb = k - ny * nx                       # ≥ 0 — межзёренный зародыш номер kgb
                 ci = np.unravel_index(k if kgb < 0 else gcell[kgb], (ny, nx))
@@ -404,14 +438,14 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
                     new_tip(pid, cc - half * tv, cc + half * tv, psi, "intra" if kgb < 0 else "gb",
                             grains[ci] if kgb < 0 else gpid[kgb])
             if batch:
-                add_batch(batch, deplete=False)
+                add_batch(batch, deplete=False, extra=halo_update(range(n_before, len(plates))) if p.halo else None)
                 tried[:] = False
                 if ngb:
                     tried_gb[:] = False
         if p.grow_kin and tips:                         # рост кончиков за шаг (и зародышей этого шага)
             segs = grow_tips(dt, D, c_eq)
             if segs:
-                add_batch(segs, deplete=False)
+                add_batch(segs, deplete=False, extra=halo_update(sorted({e["pid"] for e in tips})) if p.halo else None)
         # диффузия водорода за шаг; с напряжениями — по химическому потенциалу RT ln c − V_H σ_h
         # (переменные Слотбома: u = c·e^(−φ) диффундирует, c = u·e^φ; масса сохраняется перенормировкой)
         if p.stress_diff:
