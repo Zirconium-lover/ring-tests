@@ -1,0 +1,78 @@
+\chapter{Справочник}\label{app:ref}
+
+\section{Обозначения}
+
+\begin{center}\small
+\begin{tabular}{lll}\toprule
+символ & смысл & единицы\\\midrule
+$r,\ \theta,\ z$ & радиус (ND), окружность (TD), ось трубы (RD) & ---\\
+$\psi$ & угол следа пластинки к окружности & град\\
+$\chi_0,\ \chi_s$ & наклон оси $c$ к радиусу и разброс & град\\
+$H$, $c$ & водород всего и в растворе & ppm (масс.)\\
+$c_{\TSSD},\ c_{\TSSP}$ & линии растворения и выпадения & ppm\\
+$Q$, $Q_D$ & теплота растворения, энергия активации диффузии & кДж/моль\\
+$n_H$ & моли водорода в м$^3$ гидрида, $1.01\cdot10^5$ & моль/м$^3$\\
+$C_{\text{гидр}}$ & водород в единице площади гидрида, 15\,660 & ppm\\
+$\eps^*$; $\eps_n,\ \eps_t$ & собственная деформация; по нормали и вдоль & ---\\
+$\eps_p$, $p$ & пластическая деформация; накопленная & ---\\
+$\sigma$, $\sigma_\theta$, $\sigma_h$ & напряжение; окружное; гидростатическое & МПа\\
+$E,\ \nu,\ \lambda,\ \mu$ & модули упругости & ГПа\\
+$\sigma_y$, $h$ & предел текучести, упрочнение & МПа\\
+$g$ & выгода зарождения от напряжений $\sigma:\eps^*/\eps_n$ & МПа\\
+$\Delta$, $\Delta_0$ & движущая сила; её значение на TSSP & МПа\\
+$B$ & барьер зарождения на TSSP в $kT$ & ---\\
+$r$, $\nu_c$ & скорость зарождения в клетке; её значение на TSSP & 1/с\\
+$D$, $D_0$ & коэффициент диффузии водорода & м$^2$/с\\
+$k_{\text{tip}}$ & доля диффузионного предела скорости кончика & ---\\
+$f$, $\theta$ & фактор формы и угол смачивания зародыша на границе & ---\\
+RHF, $F_{n45}$, RHCP & меры структуры (гл.~\ref{ch:measures}) & ---\\\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Карта кода}
+
+\begin{center}\small
+\begin{tabularx}{\linewidth}{>{\ttfamily\small}p{4.3cm}X}\toprule
+\normalfont файл & что делает\\\midrule
+thermo.py & линии растворимости, ход нагрева и охлаждения\\
+ca\_hydride.py & параметры \code{Params}, зёрна и грани, упругость через Фурье, пластинка на сетке\\
+ca\_kinetic.py & кинетический автомат \code{run\_kinetic}, \code{KParams}\\
+halo.py & таблица ореолов и их наложение на сетку автомата\\
+ca\_analysis.py, calib\_beta.py & меры: RHF по снимку, пакеты\\
+connectivity.py & RHLD, HCC, RHCF, RHCP\\
+calib\_kin.py, calib\_kin\_report.py & перебор параметров и сводка против Lepine и Cinbiz\\
+son\_run.py, son\_grain.py & расчёт в условиях Son 2026\\
+ca3d\_kinetic.py & трёхмерный кинетический движок, сечения как шлифы\\
+tool.py & «инструмент»: материал + текстура + история $\to$ структура и меры\\
+fe/hill\_fft.py & упругопластичность (Мизес, Хилл) на Фурье\\
+fe/stack\_fe.py, fe/stack\_compare.py & стопки в CalculiX и сверка с Фурье\\
+fe/halo\_runs.py, fe/halo\_table.py, fe/halo\_check.py & ореолы: расчёт, таблица, проверка сложения\\
+\bottomrule
+\end{tabularx}
+\end{center}
+Рисунки книги строятся из \code{hydrides/textbook/figs\_src} (Manim, белый фон):
+\code{prep.py} готовит данные из расчётов, \code{render.sh} рендерит кадры.
+
+\section{Литература, на которую опирается модель}
+
+\begin{itemize}\small
+\item Puls M.P. The Effect of Hydrogen and Hydrides on the Integrity of Zirconium Alloy Components:
+  Delayed Hydride Cracking. Springer, 2012 --- гистерезис, стопки гидридов, остаточные напряжения,
+  модель Даттона--Пульса.
+\item Carpenter G.J.C. J. Nucl. Mater. 48 (1973) 264 --- несоответствие $\delta$-гидрида.
+\item Плясов и др., Ядерная физика и инжиниринг 14 (2023) 12 --- TSSD и TSSP Э635, Э110.
+\item Vizcaíno P. и др., J. Nucl. Mater. 447 (2014) 82 --- сдвиг выпадения 0.08\,$^\circ$C/МПа, фора зёрен.
+\item Cinbiz M.N. и др., J. Nucl. Mater. (2016) --- порог при одно- и двухосном растяжении.
+\item Lepine, диссертация (2026) --- RHF, шаг пакетов, FIB-SEM гидридов Zircaloy-4.
+\item Desquines J. и др., J. Nucl. Mater. (2014) --- порог от содержания водорода.
+\item Son, Jo, Woo, Chen, Lee. Mater. Sci. Eng. A 977 (2026) 151019 --- переориентация в Zr--Nb, межзёренные гидриды.
+\item Kim, Kim, Woo, Lee. J. Nucl. Mater. 564 (2022) 153647 --- программа PROPHET (RHF, RHCP).
+\item Jo, Woo, Lee. J. Nucl. Mater. 603 (2025) 155445 --- энергии границ, модель зарождения.
+\item Qin W. и др., Acta Mater. 59 (2011) 7010 --- выбор границ межзёренным гидридом.
+\item Fang Q. и др. (2017) --- томография: гидриды проходят сквозь границы.
+\item Min S.-J., Kim M.-S., Kim K.-T. J. Nucl. Mater. 441 (2013) 306 --- скорость охлаждения.
+\item Sakamoto K., Nakatsuka M. J. Nucl. Sci. Technol. 43 (2006) 1136 --- порог в рекристаллизованном металле.
+\item Khachaturyan A.G. Theory of Structural Transformations in Solids (1983) --- микроупругость.
+\item Moulinec H., Suquet P. (1998) --- Фурье-методы для неоднородных сред.
+\item Motta A.T. и др., J. Nucl. Mater. 518 (2019) 440 --- обзор гидридов в оболочках.
+\end{itemize}

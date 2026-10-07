@@ -1,0 +1,6 @@
+*.aux
+*.log
+*.out
+*.toc
+figs_src/data/
+figs_src/__pycache__/

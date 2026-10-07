@@ -1,0 +1,110 @@
+\documentclass[11pt,a4paper,openany]{book}
+\usepackage[T2A]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[english,russian]{babel}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{graphicx}
+\usepackage{booktabs,array,multirow,tabularx}
+\usepackage[dvipsnames]{xcolor}
+\usepackage[most]{tcolorbox}
+\usepackage{enumitem}
+\usepackage[font=small,labelfont={bf,color=ink},textfont={color=sub},margin=0.5cm]{caption}
+\usepackage[a4paper,top=2.3cm,bottom=2.4cm,left=2.4cm,right=2.4cm,headheight=14pt]{geometry}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{microtype}
+\usepackage[colorlinks=true,linkcolor=circ,urlcolor=circ,citecolor=circ]{hyperref}
+
+\graphicspath{{figs/}}
+
+% цвета — те же, что в рисунках
+\definecolor{ink}{HTML}{1D1D1F}
+\definecolor{sub}{HTML}{5F6368}
+\definecolor{dim}{HTML}{9AA0A6}
+\definecolor{faint}{HTML}{EEF0F2}
+\definecolor{circ}{HTML}{2A6FDB}
+\definecolor{rad}{HTML}{D93A3A}
+\definecolor{load}{HTML}{D18B00}
+\definecolor{plast}{HTML}{7B4EA3}
+\definecolor{hydr}{HTML}{1E9E6A}
+\color{ink}
+
+% заголовки в духе 3Blue1Brown: крупно, просто, цветная полоска
+\titleformat{\chapter}[display]
+  {\normalfont\color{ink}}
+  {\color{circ}\large\scshape Глава \thechapter}
+  {6pt}
+  {\Huge\bfseries}
+  [\vspace{4pt}{\color{circ}\titlerule[1.2pt]}]
+\titlespacing*{\chapter}{0pt}{-10pt}{22pt}
+\titleformat{\section}{\normalfont\Large\bfseries\color{ink}}{\color{circ}\thesection}{0.8em}{}
+\titleformat{\subsection}{\normalfont\large\bfseries\color{ink}}{\color{sub}\thesubsection}{0.8em}{}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[LE]{\small\color{sub}\leftmark}
+\fancyhead[RO]{\small\color{sub}\rightmark}
+\fancyfoot[C]{\small\color{sub}\thepage}
+\renewcommand{\headrulewidth}{0pt}
+
+\setlist{itemsep=2pt,topsep=4pt}
+\setlength{\parskip}{3pt}
+
+% блоки
+\newtcolorbox{idea}[1][Интуиция]{enhanced,breakable,colback=circ!5,colframe=circ,boxrule=0pt,leftrule=3pt,arc=0pt,
+  title={#1},fonttitle=\bfseries\color{circ},coltitle=circ,colbacktitle=circ!5,attach title to upper={\ ---\ },
+  left=8pt,right=8pt,top=6pt,bottom=6pt}
+\newtcolorbox{keyf}[1][Главная формула]{enhanced,colback=white,colframe=load,boxrule=1.2pt,arc=4pt,
+  title={#1},fonttitle=\bfseries\small,coltitle=white,colbacktitle=load,left=8pt,right=8pt}
+\newtcolorbox{warnbox}[1][Ограничение]{enhanced,breakable,colback=rad!4,colframe=rad,boxrule=0pt,leftrule=3pt,arc=0pt,
+  title={#1},fonttitle=\bfseries\color{rad},coltitle=rad,colbacktitle=rad!4,attach title to upper={\ ---\ },left=8pt,right=8pt}
+\newtcolorbox{codebox}{enhanced,breakable,colback=faint,colframe=faint,boxrule=0pt,arc=3pt,left=8pt,right=8pt,
+  fontupper=\small\color{sub}}
+\newcounter{ex}[chapter]
+\renewcommand{\theex}{\thechapter.\arabic{ex}}
+\newtcolorbox{exercise}{enhanced,breakable,colback=hydr!4,colframe=hydr,boxrule=0pt,leftrule=3pt,arc=0pt,
+  before upper={\refstepcounter{ex}\textbf{\color{hydr}Упражнение \theex.}\ },left=8pt,right=8pt}
+
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\fig}[3][0.98]{\begin{figure}[htbp]\centering\includegraphics[width=#1\linewidth]{#2}\caption{#3}\label{fig:#2}\end{figure}}
+\newcommand{\eps}{\varepsilon}
+\newcommand{\TSSD}{\mathrm{TSSD}}
+\newcommand{\TSSP}{\mathrm{TSSP}}
+\newcommand{\RHF}{\mathrm{RHF}}
+
+\hypersetup{pdftitle={Модель гидридов в оболочках из циркония: учебник},pdfauthor={ring-tests/hydrides}}
+
+\begin{document}
+\frontmatter
+\begin{titlepage}
+\centering
+\vspace*{2.2cm}
+{\color{circ}\rule{\linewidth}{1.5pt}}\\[14pt]
+{\Huge\bfseries Как гидриды выбирают\\[6pt] направление}\\[12pt]
+{\Large\color{sub} Учебник по клеточно-кинетической модели гидридов\\ в трубах из циркониевых сплавов}\\[10pt]
+{\color{circ}\rule{\linewidth}{1.5pt}}\\[1.2cm]
+\includegraphics[width=0.9\linewidth]{F01_Tube}\\[1.2cm]
+{\large Для тех, кто хочет понять модель с карандашом в руке:\\ физика, уравнения, постановки, алгоритм, проверки, границы}\\[2.4cm]
+{\color{sub} Проект \texttt{ring-tests/hydrides}\quad·\quad октябрь 2026}
+\end{titlepage}
+
+\input{ch00_preface}
+\tableofcontents
+
+\mainmatter
+\input{ch01_problem}
+\input{ch02_solubility}
+\input{ch03_misfit}
+\input{ch04_plasticity}
+\input{ch05_nucleation}
+\input{ch06_hydrogen}
+\input{ch07_automaton}
+\input{ch08_measures}
+\input{ch09_results}
+\input{ch10_limits}
+
+\appendix
+\input{app_answers}
+\input{app_reference}
+
+\end{document}
