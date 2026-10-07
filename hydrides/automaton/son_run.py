@@ -4,7 +4,7 @@
 длины межзёренных гидридов (CWSR 92 %, PRXA 68 %, у радиальных PRXA 62 %).
 Варианты: фора зёрен из опыта Vizcaíno 2014 на Zr-2.5Nb (5 °C) — без подгонки; фора по калибровке на Zry-4
 (10.9 °C); первый вариант с ростом во времени и переходом через границы.
-python son_run.py папка [процессов]"""
+python son_run.py папка [процессов] [варианты через запятую]"""
 import os
 import sys
 import json
@@ -60,7 +60,8 @@ if __name__ == "__main__":
     os.makedirs(out, exist_ok=True)
     for s in SEEDS:                     # нерастворившиеся гидриды считаются один раз на затравку (кэш)
         job((out, "viz5", 0, s))
-    jobs = [(out, v, s, seed) for v, s, seed in itertools.product(VARIANTS, SIG, SEEDS)]
+    only = sys.argv[3].split(",") if len(sys.argv) > 3 else list(VARIANTS)      # какие варианты считать
+    jobs = [(out, v, s, seed) for v, s, seed in itertools.product(only, SIG, SEEDS)]
     with Pool(int(sys.argv[2]) if len(sys.argv) > 2 else 4) as pool:
         for i, _ in enumerate(pool.imap_unordered(job, jobs)):
             print(i + 1, "из", len(jobs), flush=True)

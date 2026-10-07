@@ -6,7 +6,7 @@
   fine_h06  — зерно 0.66 × 1.2 при прежней толщине пластинки 0.6 мкм (сетка 0.2, поле 120 мкм, L_min 0.6):
               радиальная пластинка в зерно не помещается — только на границах;
   fine_h06x — то же с ростом во времени и продолжением через границы (сквозьзёренные перемычки, как у Son).
-python son_grain.py папка [процессов]"""
+python son_grain.py папка [процессов] [варианты через запятую]"""
 import os
 import sys
 import json
@@ -59,8 +59,9 @@ def job(a):
 if __name__ == "__main__":
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
-    pre = [(out, v, 0, s) for v in GEOM for s in SEEDS if v != "fine_h06x"]     # кэш нерастворившихся по геометрии
-    rest = [(out, v, s, seed) for v, s, seed in itertools.product(GEOM, SIG, SEEDS)]
+    only = sys.argv[3].split(",") if len(sys.argv) > 3 else list(GEOM)          # какие варианты считать
+    pre = [(out, v, 0, s) for v in only for s in SEEDS if v != "fine_h06x"]     # кэш нерастворившихся по геометрии
+    rest = [(out, v, s, seed) for v, s, seed in itertools.product(only, SIG, SEEDS)]
     with Pool(int(sys.argv[2]) if len(sys.argv) > 2 else 4) as pool:
         for i, _ in enumerate(pool.imap_unordered(job, pre)):
             print("кэш", i + 1, "из", len(pre), flush=True)

@@ -126,6 +126,11 @@ def simulate(mat: Material, tex: Texture, hist: History, model: Model = Model(),
             P0 = _plates_arr(r0["plates"])
             if key:
                 np.savez_compressed(key, plates=P0)
+        # при нагреве сначала растворяются мелкие гидриды: остаются самые длинные пластинки исходной
+        # структуры (равные по длине — в случайном порядке), они разбросаны по всей стенке.
+        # (Прежде брались первые выпавшие — одна колода, и всё новое выпадение собиралось вокруг неё.)
+        order = np.lexsort((np.random.default_rng([seed, 3]).random(len(P0)), -P0[:, 3]))
+        P0 = P0[order]
         area = np.cumsum(2 * P0[:, 3] * base.get("h_um", 0.6)) / (size_um[0] * size_um[1])
         init = P0[: max(1, int(np.searchsorted(area, th.frac_left)))]
     if model.engine == "kin":

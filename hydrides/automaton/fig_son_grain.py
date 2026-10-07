@@ -44,7 +44,8 @@ axs = [fig.add_axes([0.03 + 0.205 * i, 0.12, 0.17, 0.74]) for i in range(3)]
 ax_img = fig.add_axes([0.655, 0.06, 0.33, 0.84])
 for v, c, lab in VAR:
     if v in R:
-        curve(axs[0], v, "RHF_image", color=c, label=lab)
+        if v != "fine_sim":             # пластинки 0.16 мкм на оптическом снимке не разрешаются
+            curve(axs[0], v, "RHF_image", color=c, label=lab)
         curve(axs[1], v, "RHF45_plates", color=c, label=lab)
         curve(axs[2], v, "GB_frac", color=c, label=lab)
 for name, mk in (("CWSR", "s"), ("PRXA", "^")):
@@ -69,16 +70,24 @@ for k, (sig, x0) in enumerate(((0, 0.0), (146, W + 3.0))):
     grains, gpsi, gbd = make_grains(p, np.random.default_rng(1), gb=True)
     ny, nx = grains.shape; n = int(W / p.dx)
     gbm = np.zeros(ny * nx, bool); gbm[gbd["cells"]] = True; gbm = gbm.reshape(ny, nx)
-    ax_img.imshow(np.where(gbm[:n, :n], 0.85, 1.0), cmap="gray", vmin=0, vmax=1, extent=(x0, x0 + W, W, 0),
-                  interpolation="nearest")
-    for (cy, cx, psi, half), kd in zip(z["plates"], z["kind"]):
+    # окно 30 × 30 мкм там, где больше всего пластинок
+    P = z["plates"]
+    y0 = float(np.clip(np.median(P[:, 0]) - W / 2, 0, 120 - W))
+    xh = np.histogram(P[:, 1], bins=np.arange(0, 121 - W, 5.0) + 0.0)[0] if len(P) else [0]
+    cnt = [((P[:, 1] >= a) & (P[:, 1] < a + W) & (P[:, 0] >= y0) & (P[:, 0] < y0 + W)).sum() for a in np.arange(0, 91, 5.0)]
+    xa = float(np.arange(0, 91, 5.0)[int(np.argmax(cnt))])
+    iy, ix = int(y0 / p.dx), int(xa / p.dx)
+    ax_img.imshow(np.where(gbm[iy:iy + n, ix:ix + n], 0.85, 1.0), cmap="gray", vmin=0, vmax=1,
+                  extent=(x0, x0 + W, W, 0), interpolation="nearest")
+    for (cy, cx, psi, half), kd in zip(P, z["kind"]):
+        cy, cx = cy - y0, cx - xa
         if not (-2 < cy < W + 2 and -2 < cx < W + 2):
             continue
         ty, tx = -np.sin(psi), np.cos(psi)
         xs = np.clip([cx - half * tx, cx + half * tx], 0, W) + x0
         ax_img.plot(xs, [cy - half * ty, cy + half * ty], lw=2.0, color=ORANGE if kd == 1 else BLUE,
                     solid_capstyle="butt")
-    ax_img.text(x0, -0.8, f"{sig} МПа", fontsize=10, color=INK)
+    ax_img.text(x0, -0.8, f"{sig} МПа (окно y {y0:.0f}–{y0 + W:.0f}, x {xa:.0f}–{xa + W:.0f} мкм)", fontsize=9.5, color=INK)
 ax_img.set_xlim(0, 2 * W + 3); ax_img.set_ylim(W, -2); ax_img.set_xticks([]); ax_img.set_yticks([])
 ax_img.set_title("зерно 0.66 × 1.2 мкм, пластинка 0.6 мкм: межзёренные — оранжевые, в теле зерна — синие; 30 мкм",
                  loc="left", fontsize=9, color=INK)
