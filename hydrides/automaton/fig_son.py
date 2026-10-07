@@ -1,5 +1,5 @@
 """Рис. 19: расчёт под условия Son и др. 2026 (Zr-Nb, 187 ppm, 400 °C, 0.3 °C/мин) против их опыта —
-RHF по снимку и доля межзёренных гидридов. python fig_son.py папка (son_run.py)"""
+RHF по снимку и доля межзёренных гидридов. python fig_son.py папка [папка ...] (son_run.py)"""
 import os
 import sys
 import json
@@ -16,12 +16,17 @@ BLUE, ORANGE, GREEN, VIOLET, INK, MUTED, BG, GRID = ("#2a78d6", "#eb6834", "#2f9
 plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10, "axes.edgecolor": MUTED, "axes.labelcolor": INK,
                      "xtick.color": MUTED, "ytick.color": MUTED})
 R = defaultdict(lambda: defaultdict(list))
-for f in glob.glob(sys.argv[1] + "/*.json"):
-    m = json.load(open(f))
-    R[m["variant"]][int(m["sigma_app"])].append(m)
+for d in sys.argv[1:]:                      # вариант — из первой папки, где он есть
+    got = defaultdict(lambda: defaultdict(list))
+    for f in glob.glob(d + "/*.json"):
+        m = json.load(open(f))
+        got[m["variant"]][int(m["sigma_app"])].append(m)
+    for v, by in got.items():
+        if v not in R:
+            R[v] = by
 VAR = [("viz5", BLUE, "фора зёрен 5 °C (Vizcaíno, Zr-2.5Nb) — без подгонки"),
-       ("viz5_s2", GREEN, "то же + разброс по зёрнам 2 °C"),
-       ("viz5_s3", VIOLET, "то же + разброс по зёрнам 3 °C"),
+       ("viz5_s2", GREEN, "то же + разброс по зёрнам 2 °C (старые остатки)"),
+       ("viz5_s3", VIOLET, "то же + разброс по зёрнам 3 °C (старые остатки)"),
        ("zry10.9", MUTED, "фора 10.9 °C (калибровка на Zry-4, Cinbiz)")]
 SON = {"CWSR": {0: 0.0, 83: 0.038, 96: 0.107, 146: 0.454}, "PRXA": {0: 0.0, 83: 0.115, 96: 0.263, 146: 0.540}}
 fig, axs = plt.subplots(1, 3, figsize=(18, 5.2), facecolor=BG)

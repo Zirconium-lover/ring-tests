@@ -1,5 +1,5 @@
 """Рис. 20: мелкое зерно в условиях опыта Son и др. 2026 — RHF по снимку, доля радиальных пластинок, доля
-межзёренных и снимок. python fig_son_grain.py папка_son_grain папка_son_run"""
+межзёренных и снимок. python fig_son_grain.py папка [папка ...] (первая — снимок)"""
 import os
 import sys
 import json
@@ -19,16 +19,20 @@ BLUE, ORANGE, GREEN, VIOLET, INK, MUTED, BG, GRID = ("#2a78d6", "#eb6834", "#2f9
 plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10, "axes.edgecolor": MUTED, "axes.labelcolor": INK,
                      "xtick.color": MUTED, "ytick.color": MUTED})
 R = defaultdict(lambda: defaultdict(list))
-for d in sys.argv[1:3]:
+for d in sys.argv[1:]:                      # вариант — из первой папки, где он есть
+    got = defaultdict(lambda: defaultdict(list))
     for f in glob.glob(d + "/*.json"):
         m = json.load(open(f))
         if m["variant"] in ("viz5", "ref02", "fine_sim", "fine_h06", "fine_h06x"):
-            R[m["variant"]][int(m["sigma_app"])].append(m)
+            got[m["variant"]][int(m["sigma_app"])].append(m)
+    for v, by in got.items():
+        if v not in R:
+            R[v] = by
 VAR = [("viz5", MUTED, "зерно 2.5 × 4.5 мкм, сетка 0.4, поле 240 мкм"),
        ("ref02", BLUE, "зерно 2.5 × 4.5 мкм, сетка 0.2, поле 120 мкм"),
-       ("fine_sim", GREEN, "зерно 0.66 × 1.2 мкм, всё в масштабе 0.27"),
+       ("fine_sim", GREEN, "зерно 0.66 × 1.2 мкм, всё в масштабе 0.27 (старые остатки)"),
        ("fine_h06", ORANGE, "зерно 0.66 × 1.2 мкм, пластинка 0.6 мкм"),
-       ("fine_h06x", VIOLET, "то же + рост и переход через границы")]
+       ("fine_h06x", VIOLET, "то же + рост и переход через границы (старые остатки)")]
 SON = {"CWSR": {0: 0.0, 83: 0.038, 96: 0.107, 146: 0.454}, "PRXA": {0: 0.0, 83: 0.115, 96: 0.263, 146: 0.540}}
 
 
