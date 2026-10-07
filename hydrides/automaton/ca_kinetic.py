@@ -451,6 +451,9 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         if p.stress_diff:
             sh = np.clip((S11 + S22 + S33) / 3.0, -p.sh_cap, p.sh_cap)
             phi = p.V_H * 1e6 * sh / (8.314 * Tk)
+            # в клетках гидрида c — счётная «яма» (водород пластинки), а не раствор: её не взвешиваем
+            # внутренним σ_h гидрида, иначе обеднение вокруг пластинки искажается (fe/diff_check.py)
+            phi[hyd > 0] = 0.0
             mass = c.sum()
             u = np.fft.irfft2(np.fft.rfft2(c * np.exp(-phi)) * np.exp(-D * k2 * dt), s=(ny, nx))
             c = u * np.exp(phi)
