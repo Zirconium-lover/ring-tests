@@ -36,7 +36,7 @@ BASE = dict(lines="E635", T_max=400.0, T_end=100.0, chi0=39.0, chi_s=26.0, grain
             halo_tab=os.path.join(HERE, "data_halo", "halo_tab_e635.npz"), cross_tol=15.0, sigma_cap=1e9)
 
 
-def f_l(res, min_len_um=(5.0, 10.0), um=0.5, blur_um=1.0, level=0.25):
+def f_l(res, min_len_um=(5.0, 10.0), um=0.5, blur_um=1.0, level=0.25, n_prof=12):
     """F_l по Плясову: связные гидриды на «оптическом» снимке, длина — размах вдоль главной оси,
     радиальный — если главная ось ближе 45° к радиусу (строки — ND)."""
     g, um = render(res, um_out=um, blur_um=blur_um)
@@ -67,6 +67,12 @@ def f_l(res, min_len_um=(5.0, 10.0), um=0.5, blur_um=1.0, level=0.25):
         for i, name in enumerate(("out", "mid", "in")):
             b = sel & (yc >= i / 3) & (yc < (i + 1) / 3)
             out[f"F_l_{m:g}_{name}"] = float((L[b] * rad[b]).sum() / L[b].sum()) if b.any() else np.nan
+        # профиль по толщине (12 слоёв от наружной поверхности) — положение границы зон, табл. 2
+        prof = []
+        for i in range(n_prof):
+            b = sel & (yc >= i / n_prof) & (yc < (i + 1) / n_prof)
+            prof.append(float((L[b] * rad[b]).sum() / L[b].sum()) if b.any() else np.nan)
+        out[f"F_l_{m:g}_prof"] = prof
     return out
 
 
@@ -93,7 +99,8 @@ def job(a):
     m.update({k: v for k, v in kw.items()}, time_s=time.time() - t0)
     np.savez_compressed(os.path.join(out, name + ".npz"),
                         plates=np.array([[q["c"][0], q["c"][1], q["psi"], q["half"]] for q in r["plates"]]),
-                        kind=np.array([{"intra": 0, "gb": 1, "init": 2}.get(q.get("kind"), -1) for q in r["plates"]]))
+                        kind=np.array([{"intra": 0, "gb": 1, "init": 2}.get(q.get("kind"), -1) for q in r["plates"]]),
+                        **(dict(hyd=r["hyd"].astype(np.float16), dx=p.dx) if "ring" in kw else {}))
     json.dump(m, open(fn, "w"), default=float)
 
 
@@ -110,10 +117,14 @@ def cases(mode):
         return [dict(H_ppm=h, rate=0.5, bias_dT=b, sigma_app=s, sigma_T0=400.0, seed=1)
                 for h in (150.0, 300.0, 400.0) for s in (50, 90, 140)]
     if mode == "ring":     # кольцо целиком: профиль σ по толщине (рис. 8, 9 при 400 °C), F_l по третям (табл. 1)
+        # доля толщины от наружной поверхности; стенка 0.85 мм
         prof = {"S1_0": ((0.0, 63.0), (1.0, -31.0)),                       # 200 Н, участок 0°: наружная растянута
                 "S1_90": ((0.0, -130.0), (0.8, 195.0), (1.0, 215.0)),      # 200 Н, 90°: внутренняя, пласт. полка
                 "S2_0": ((0.0, 81.0), (1.0, -15.0)),                        # 350 Н, 0° (рис. 9б, наклон 115 МПа/мм)
-                "S2_90": ((0.0, -220.0), (0.63, 220.0), (1.0, 220.0))}      # 350 Н, 90°: оценка ×1.75 с пределом
+                # 350 Н, 90°: в статье профиля нет; сила и момент 200 Н ×1.75 превышают предельные для
+                # идеально пластичного бруса (σ_y 210) — шарнир, нейтральная ось 0.66 мм от внутренней
+                # поверхности; ядро с наклоном 2000 МПа/мм (в статье «больше 100 МПа на 0.08 мм»)
+                "S2_90p": ((0.0, -220.0), (0.089, -220.0), (0.347, 220.0), (1.0, 220.0))}
         Hs = {"S1": 152.0, "S2": 168.0}
         return [dict(H_ppm=Hs[k[:2]], rate=0.75, bias_dT=b, sigma_prof=v, ring=k, size_um=(850.0, 240.0),
                      chi0_profile=(38.3, 38.7, 32.8), seed=1)
