@@ -19,6 +19,7 @@ B — барьер в kT на линии TSSP (классическая теор
 from dataclasses import dataclass
 import numpy as np
 from scipy import ndimage as ndi
+import scipy.fft as sfft
 import ca_hydride as ca
 from ca_hydride import Params, Elastic, make_grains, plate_eigen, eigen_components_for, grow
 from thermo import TSS, c_line, H_IN_HYDRIDE_PPM, VOL_HYD_PER_ZR
@@ -335,27 +336,75 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
             out.append((ys, xs, comps, 1.0))
         return out
 
-    def add_batch(batch, deplete=True, extra=None):
-        """Пластинки одного шага: одно решение упругой задачи на всех, водород — из ячеек пластинок;
-        extra — добавки собственной деформации (ореолы): (строки, столбцы, компоненты, знак)."""
-        Ein = [np.zeros((ny, nx)) for _ in range(4)]
+    Epend = [np.zeros((ny, nx)) for _ in range(4)]     # собственная деформация, ещё не учтённая в S
+    pend = [False]
+    gcache = {}                                         # поле зарождения от S — до следующего решения
+
+    def add_batch(batch, deplete=True, extra=None, solve=True):
+        """Пластинки одного шага: водород — из ячеек пластинок, собственная деформация копится;
+        extra — добавки собственной деформации (ореолы): (строки, столбцы, компоненты, знак).
+        solve=False — без решения упругой задачи: на шаг одно решение (solve_pending), задача линейная."""
         for ys, xs, comps, sgn in (extra or ()):
             sel = np.ix_(ys, xs)
-            for a, v in zip(Ein, comps):
+            for a, v in zip(Epend, comps):
                 a[sel] += sgn * v
-        sink = np.zeros((ny, nx))
+        sink = np.zeros((ny, nx)) if deplete else None
         for c, psi, half in batch:
             ys, xs, fr, comps = plate_eigen((ny, nx), p.dx, c, psi, half, p.h_um)
             sel = np.ix_(ys, xs)
             new = np.clip(hyd[sel] + fr, 0, 1) - hyd[sel]
             hyd[sel] += new
-            sink[sel] += new
-            for a, v in zip(Ein, comps):
+            if deplete:
+                sink[sel] += new
+            for a, v in zip(Epend, comps):
                 a[sel] += fr * v
-        d11, d22, d12, d33 = el.stress(*Ein)
-        S11[:] += d11; S22[:] += d22; S12[:] += d12; S33[:] += d33
-        occ[:] = ndi.binary_dilation(hyd > 0.2, iterations=max(1, int(round(p.occ_um / p.dx))) if p.occ_um > 0 else 1)
+        pend[0] = True
+        if solve:
+            solve_pending()
         return sink * C_HYD if deplete else 0.0
+
+    def solve_pending():
+        """Одно решение упругой задачи на всё накопленное; занятость и поле зарождения — заново."""
+        if not pend[0]:
+            return
+        d11, d22, d12, d33 = el.stress(*Epend)
+        S11[:] += d11; S22[:] += d22; S12[:] += d12; S33[:] += d33
+        for a in Epend:
+            a.fill(0.0)
+        occ[:] = ndi.binary_dilation(hyd > 0.2, iterations=max(1, int(round(p.occ_um / p.dx))) if p.occ_um > 0 else 1)
+        pend[0] = False
+        gcache.clear()
+
+    def nuc_field():
+        """Вклад напряжений в движущую силу зарождения: тело зерна (g) и грани (g_gb); меняется только
+        после решения упругой задачи — считается один раз на решение, а не на каждом шаге."""
+        if p.nuc_um > 0:                                # поле, усреднённое по зародышу
+            Sn = [ndi.gaussian_filter(a, p.nuc_um / p.dx, mode="wrap") for a in (S11, S22, S12, S33)]
+        else:
+            Sn = (S11, S22, S12, S33)
+        g = (e11n * Sn[0] + e22n * Sn[1] + 2 * e12n * Sn[2] + e33n * Sn[3]) / EPS_N * p.kappa
+        if p.cap_local_only:
+            mtx = hyd < 0.2
+            Sm = [float(a[mtx].mean()) for a in (S11, S22, S12, S33)]
+            g_mean = (e11n * Sm[0] + e22n * Sm[1] + 2 * e12n * Sm[2] + e33n * Sm[3]) / EPS_N * p.kappa
+            g = np.clip(g - g_mean, -p.sigma_cap, p.sigma_cap) + g_mean + g_app
+        else:
+            g = np.clip(g, -p.sigma_cap, p.sigma_cap) + g_app
+        if p.g_extra is not None:
+            g = g + p.g_extra
+        g_gb = None
+        if ngb:
+            # межзёренные зародыши: та же формула, но ε* — для пластинки по следу грани
+            Sf = [a.ravel()[gcell] for a in Sn]
+            g_gb = (ge11 * Sf[0] + ge22 * Sf[1] + 2 * ge12 * Sf[2] + e33n * Sf[3]) / EPS_N * p.kappa
+            if p.cap_local_only:
+                gm = (ge11 * Sm[0] + ge22 * Sm[1] + 2 * ge12 * Sm[2] + e33n * Sm[3]) / EPS_N * p.kappa
+                g_gb = np.clip(g_gb - gm, -p.sigma_cap, p.sigma_cap) + gm + g_app_gb
+            else:
+                g_gb = np.clip(g_gb, -p.sigma_cap, p.sigma_cap) + g_app_gb
+            if p.g_extra is not None:
+                g_gb = g_gb + np.asarray(p.g_extra).ravel()[gcell]
+        return g, g_gb
 
     # начальное состояние: растворилось до TSSD(T_max), остальное — нерастворившиеся пластинки
     c0 = float(min(p.H_ppm, c_line(p.T_max, L["TSSD"])))
@@ -384,37 +433,30 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         fac = min(1.0, Tk / (p.sigma_T0 + 273.15)) if p.sigma_T0 > 0 else 1.0
         if p.halo and p.sigma_T0 > 0 and abs(fac - fac_halo) > 0.01:
             ht.set_load(p.sigma_app * fac); fac_halo = fac
-        if p.nuc_um > 0:                                # поле, усреднённое по зародышу
-            Sn = [ndi.gaussian_filter(a, p.nuc_um / p.dx, mode="wrap") for a in (S11, S22, S12, S33)]
-        else:
-            Sn = (S11, S22, S12, S33)
-        g = (e11n * Sn[0] + e22n * Sn[1] + 2 * e12n * Sn[2] + e33n * Sn[3]) / EPS_N * p.kappa
-        if p.cap_local_only:
-            mtx = hyd < 0.2
-            Sm = [float(a[mtx].mean()) for a in (S11, S22, S12, S33)]
-            g_mean = (e11n * Sm[0] + e22n * Sm[1] + 2 * e12n * Sm[2] + e33n * Sm[3]) / EPS_N * p.kappa
-            g = np.clip(g - g_mean, -p.sigma_cap, p.sigma_cap) + g_mean + g_app
-        else:
-            g = np.clip(g, -p.sigma_cap, p.sigma_cap) + g_app
-        if p.g_extra is not None:
-            g = g + p.g_extra
-        lnc = np.log(np.clip(c, 1e-6, None)) + lnc_gorsky
-        Delta = p.Delta0 + N_H_MPa_per_K * Tk * (lnc - np.log(c_line(T, L["TSSP"]))) + EPS_N * g \
-            + N_H_MPa_per_K * Q_over_R / Tk * (dT_map + (fac - 1.0) * dT_app)
+        if not gcache:
+            gcache["g"], gcache["g_gb"] = nuc_field()
+            gcache["Eg"] = EPS_N * gcache["g"]
+        g, g_gb = gcache["g"], gcache["g_gb"]
+        # Δ = Δ0 + n_H·R·T·ln(c/TSSP) + ε_n·g + n_H·Q/T·dT — на месте, в том же порядке действий, что и формула
+        # (результат побитно тот же, без полудюжины временных полей)
+        lnc = np.maximum(c, 1e-6)
+        np.log(lnc, out=lnc)
+        lnc += lnc_gorsky
+        Delta = lnc - np.log(c_line(T, L["TSSP"]))
+        Delta *= N_H_MPa_per_K * Tk
+        Delta += p.Delta0
+        Delta += gcache["Eg"]
+        Delta += N_H_MPa_per_K * Q_over_R / Tk * (dT_map if fac == 1.0 else dT_map + (fac - 1.0) * dT_app)
         ok = (Delta > 0) & ~occ & ~tried
-        lnr = np.full((ny, nx), -np.inf)
-        lnr[ok] = np.log(p.nu_c) + ln_cell - p.B * ((p.Delta0 / Delta[ok]) ** 2 - 1.0)
+        # ln скорости по всем клеткам сразу, не-места — −∞ (без выборки по маске)
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            lnr = np.divide(p.Delta0, Delta)
+            np.square(lnr, out=lnr)
+            lnr -= 1.0
+            lnr *= p.B
+            np.subtract(np.log(p.nu_c) + ln_cell, lnr, out=lnr)
+        np.copyto(lnr, -np.inf, where=~ok)
         if ngb:
-            # межзёренные зародыши: та же формула, но ε* — для пластинки по следу грани
-            Sf = [a.ravel()[gcell] for a in Sn]
-            g_gb = (ge11 * Sf[0] + ge22 * Sf[1] + 2 * ge12 * Sf[2] + e33n * Sf[3]) / EPS_N * p.kappa
-            if p.cap_local_only:
-                gm = (ge11 * Sm[0] + ge22 * Sm[1] + 2 * ge12 * Sm[2] + e33n * Sm[3]) / EPS_N * p.kappa
-                g_gb = np.clip(g_gb - gm, -p.sigma_cap, p.sigma_cap) + gm + g_app_gb
-            else:
-                g_gb = np.clip(g_gb, -p.sigma_cap, p.sigma_cap) + g_app_gb
-            if p.g_extra is not None:
-                g_gb = g_gb + np.asarray(p.g_extra).ravel()[gcell]
             Delta_gb = p.Delta0 + N_H_MPa_per_K * Tk * (lnc.ravel()[gcell] - np.log(c_line(T, L["TSSP"]))) \
                 + EPS_N * g_gb + N_H_MPa_per_K * Q_over_R / Tk * (dT_gb + (fac - 1.0) * dT_gb_app)
             ok_gb = (Delta_gb > 0) & ~occ.ravel()[gcell] & ~tried_gb
@@ -429,8 +471,9 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         dt = p.dT_max / q
         lam_tot = 0.0
         if ok.any() or ok_gb.any():
-            m = max(lnr[ok].max() if ok.any() else -np.inf, lnr_gb[ok_gb].max() if ok_gb.any() else -np.inf)
-            w = np.exp(lnr - m)                         # относительные веса
+            m = max(lnr.max() if ok.any() else -np.inf, lnr_gb[ok_gb].max() if ok_gb.any() else -np.inf)
+            w = np.subtract(lnr, m)                     # относительные веса
+            np.exp(w, out=w)
             if ngb:
                 w = np.concatenate([w.ravel(), np.exp(lnr_gb - m)])
             lam_tot = float(np.exp(m) * w.sum() * dt)
@@ -486,14 +529,17 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
                     new_tip(pid, cc - half * tv, cc + half * tv, psi, "intra" if kgb < 0 else "gb",
                             grains[ci] if kgb < 0 else gpid[kgb])
             if batch:
-                add_batch(batch, deplete=False, extra=halo_update(range(n_before, len(plates))) if p.halo else None)
+                add_batch(batch, deplete=False, extra=halo_update(range(n_before, len(plates))) if p.halo else None,
+                          solve=False)
                 tried[:] = False
                 if ngb:
                     tried_gb[:] = False
         if p.grow_kin and tips:                         # рост кончиков за шаг (и зародышей этого шага)
             segs = grow_tips(dt, D, c_eq)
             if segs:
-                add_batch(segs, deplete=False, extra=halo_update(sorted({e["pid"] for e in tips})) if p.halo else None)
+                add_batch(segs, deplete=False, extra=halo_update(sorted({e["pid"] for e in tips})) if p.halo else None,
+                          solve=False)
+        solve_pending()                                 # кончики не читают S и occ — решение одно на шаг
         # диффузия водорода за шаг; с напряжениями — по химическому потенциалу RT ln c − V_H σ_h
         # (переменные Слотбома: u = c·e^(−φ) диффундирует, c = u·e^φ; масса сохраняется перенормировкой)
         if p.stress_diff:
@@ -503,11 +549,11 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
             # внутренним σ_h гидрида, иначе обеднение вокруг пластинки искажается (fe/diff_check.py)
             phi[hyd > 0] = 0.0
             mass = c.sum()
-            u = np.fft.irfft2(np.fft.rfft2(c * np.exp(-phi)) * np.exp(-D * k2 * dt), s=(ny, nx))
+            u = np.fft.irfft2(sfft.rfft2(c * np.exp(-phi)) * np.exp(-D * k2 * dt), s=(ny, nx))
             c = u * np.exp(phi)
             c *= mass / c.sum()
         else:
-            c = np.fft.irfft2(np.fft.rfft2(c) * np.exp(-D * k2 * dt), s=(ny, nx))
+            c = np.fft.irfft2(sfft.rfft2(c) * np.exp(-D * k2 * dt), s=(ny, nx))      # прямое scipy: быстрее, побитно то же
         t += dt; T -= q * dt
         hist["t"].append(t); hist["T"].append(T); hist["c_mean"].append(float(c.mean()))
         hist["n"].append(len(plates)); hist["frac"].append(float(hyd.mean()))

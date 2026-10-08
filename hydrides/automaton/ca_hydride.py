@@ -29,6 +29,7 @@
 """
 from dataclasses import dataclass, field
 import numpy as np
+import scipy.fft as sfft
 from scipy import ndimage as ndi
 from scipy.spatial import cKDTree
 
@@ -145,9 +146,9 @@ class Elastic:
     def stress(self, e11, e22, e12, e33):
         lam, mu = self.lam, self.mu
         tr = e11 + e22 + e33
-        s11 = np.fft.rfft2(lam * tr + 2 * mu * e11)
-        s22 = np.fft.rfft2(lam * tr + 2 * mu * e22)
-        s12 = np.fft.rfft2(2 * mu * e12)
+        s11 = sfft.rfft2(lam * tr + 2 * mu * e11)
+        s22 = sfft.rfft2(lam * tr + 2 * mu * e22)
+        s12 = sfft.rfft2(2 * mu * e12)
         kx, ky = self.kx, self.ky
         t1 = kx * s11 + ky * s12
         t2 = kx * s12 + ky * s22

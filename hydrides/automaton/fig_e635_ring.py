@@ -87,9 +87,12 @@ for j, site in enumerate(sites):
     if key is not None:
         z = np.load(rows[key][1])
         if "hyd" in z.files:
-            h = np.asarray(z["hyd"], float)[::-1].T            # строки — толщина от внутренней, столбцы — окружность
-            axi.imshow(1 - 0.85 * np.clip(h / max(h.max(), 1e-9) * 1.2, 0, 1), cmap="gray", vmin=0, vmax=1,
-                       extent=(0, T_MM, 0, h.shape[0] * float(z["dx"]) / 1000), aspect="auto", interpolation="none")
+            h = np.asarray(z["hyd"], float)[::-1].T            # строки — окружность, столбцы — толщина от внутренней
+            k = 3                                              # максимум по блокам 3×3: тонкие пластинки не пропадают
+            h = h[: h.shape[0] // k * k, : h.shape[1] // k * k].reshape(h.shape[0] // k, k, h.shape[1] // k, k).max((1, 3))
+            axi.imshow(1 - 0.85 * np.clip(h / max(h.max(), 1e-9) * 1.5, 0, 1), cmap="gray", vmin=0, vmax=1,
+                       extent=(0, T_MM, 0, h.shape[0] * k * float(z["dx"]) / 1000), aspect="auto",
+                       interpolation="antialiased")
         axi.set_title(f"модель, фора {key[1]:g} °C", loc="left", fontsize=8, color=MUTED)
     axi.set_xlim(0, T_MM)
     axi.set_yticks([]); axi.tick_params(labelsize=7)
