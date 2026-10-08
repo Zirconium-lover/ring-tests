@@ -37,6 +37,9 @@ class KParams(Params):
     B: float = 40.0                 # барьер на линии TSSP, kT
     Delta0: float = 30.0            # избыток движущей силы на линии TSSP, МПа
     nu_c: float = 1e-6              # скорость зарождения в клетке на линии TSSP, 1/с
+    nu_dx: float = 0.4              # мкм: ν_c задана для клетки такого размера; на другой сетке скорость
+                                    # пересчитывается на площадь (тело зерна, ∝ dx²) и на длину (грань, ∝ dx),
+                                    # чтобы соотношение мест «грань/тело» не зависело от сетки (0 — по клетке)
     lam_max: float = 6.0            # не больше стольких зародышей (в среднем) за шаг
     dT_max: float = 0.5             # шаг по температуре, °C
     D0: float = 7.9e-7              # м²/с
@@ -342,6 +345,8 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
             add_batch([], deplete=False, extra=halo_update(range(len(plates)), ht0))
     T, t = p.T_max, 0.0
     q = p.rate / 60.0                                   # °C/с
+    ln_cell = 2 * np.log(p.dx / p.nu_dx) if p.nu_dx > 0 else 0.0      # тело: места ∝ площади клетки
+    ln_gbcell = np.log(p.dx / p.nu_dx) if p.nu_dx > 0 else 0.0        # грань: места ∝ длине грани в клетке
     hist = dict(t=[], T=[], c_mean=[], n=[], frac=[])
     while T > p.T_end:
         Tk = T + 273.15
@@ -360,7 +365,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
             + N_H_MPa_per_K * Q_over_R / Tk * dT_map
         ok = (Delta > 0) & ~occ & ~tried
         lnr = np.full((ny, nx), -np.inf)
-        lnr[ok] = np.log(p.nu_c) - p.B * ((p.Delta0 / Delta[ok]) ** 2 - 1.0)
+        lnr[ok] = np.log(p.nu_c) + ln_cell - p.B * ((p.Delta0 / Delta[ok]) ** 2 - 1.0)
         if ngb:
             # межзёренные зародыши: та же формула, но ε* — для пластинки по следу грани
             Sf = [a.ravel()[gcell] for a in (S11, S22, S12, S33)]
@@ -376,7 +381,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
                 + EPS_N * g_gb + N_H_MPa_per_K * Q_over_R / Tk * dT_gb
             ok_gb = (Delta_gb > 0) & ~occ.ravel()[gcell] & ~tried_gb
             lnr_gb = np.full(ngb, -np.inf)
-            lnr_gb[ok_gb] = np.log(p.nu_c) - p.B * ((p.Delta0 / Delta_gb[ok_gb]) ** 2 - 1.0)
+            lnr_gb[ok_gb] = np.log(p.nu_c) + ln_gbcell - p.B * ((p.Delta0 / Delta_gb[ok_gb]) ** 2 - 1.0)
         else:
             ok_gb = np.zeros(0, bool); lnr_gb = np.zeros(0)
         D = p.D0 * np.exp(-p.QD / (8.314 * Tk)) * 1e12   # мкм²/с
