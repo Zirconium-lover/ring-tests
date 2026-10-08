@@ -116,6 +116,9 @@ def cases(mode):
     if mode == "m1p":      # то же с коллективной пластичностью (E635_PLAST=1): фора заново
         return [dict(H_ppm=160.0, rate=0.75, bias_dT=b, sigma_app=s, seed=1)
                 for b in (1.0, 2.0, 3.0, 5.0) for s in (0, 30, 45, 60, 90)]
+    if mode == "m1p2":     # уточнение форы около порога: 4 °C и вторые затравки 4–5 °C
+        return ([dict(H_ppm=160.0, rate=0.75, bias_dT=4.0, sigma_app=s, seed=1) for s in (30, 45, 60)]
+                + [dict(H_ppm=160.0, rate=0.75, bias_dT=b, sigma_app=s, seed=2) for b in (4.0, 5.0) for s in (45, 60)])
     if mode == "m2":       # трубы под давлением: напряжение задано при 400 °C и спадает; фора — из m1
         b = float(os.environ.get("E635_BIAS", "3.0"))
         return [dict(H_ppm=210.0, rate=0.5, bias_dT=b, sigma_app=s, sigma_T0=400.0, seed=sd)
@@ -137,6 +140,9 @@ def cases(mode):
         return [dict(H_ppm=Hs[k[:2]], rate=0.75, bias_dT=b, sigma_prof=v, ring=k, size_um=(850.0, 240.0),
                      chi0_profile=(38.3, 38.7, 32.8), seed=1)
                 for b in (5.0, 8.0) for k, v in prof.items()]
+    if mode == "ringp":    # кольцо с коллективной пластичностью (E635_PLAST=1), форы из E635_BIAS="4,5"
+        bs = [float(v) for v in os.environ.get("E635_BIAS", "4").split(",")]
+        return [dict(c, bias_dT=b) for b in bs for c in cases("ring") if c["bias_dT"] == 5.0]
     if mode == "zry":      # для сравнения: фора холоднодеформированного Zircaloy-4 (17 °C) на Э635
         return [dict(H_ppm=210.0, rate=0.5, bias_dT=17.0, sigma_app=s, sigma_T0=400.0, seed=1)
                 for s in (0, 50, 90, 140)]
