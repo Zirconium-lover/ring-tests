@@ -12,7 +12,8 @@
 осевое σz: σ_tt = σθ sin²α, σ_nn = σθ cos²α, σ_tn = σθ sin α cos α. Обобщённая плоская деформация.
 Ячейка 30 мкм, для коротких пластинок (a ≤ 1.25 мкм) — 15 мкм. Нагрузка — из hill_runs.LOADS или U<σθ>.
 python halo_runs.py папка случай[,случай...] [процессов]   (случай = a2.5_al0_U110: полудлина, угол, нагрузка)
-python halo_runs.py папка таблица [процессов]   — вся таблица для автомата (A_TAB × AL_TAB × S_TAB)"""
+python halo_runs.py папка таблица [процессов]   — вся таблица для автомата (A_TAB × AL_TAB × S_TAB)
+HALO_SY=226 python halo_runs.py ...              — другой предел текучести (Э635)"""
 import os
 import sys
 import json
@@ -24,6 +25,7 @@ import hill_fft as hf  # noqa: E402
 from hill_runs import LOADS  # noqa: E402
 
 H, TH = 0.1, 0.6
+SY = float(os.environ.get("HALO_SY", 350.0))     # предел текучести матрицы: Zry-4 350, Э635 226 МПа (380 °C)
 A_TAB = (0.6, 0.9, 1.25, 1.75, 2.5)
 AL_TAB = (0, 30, 60, 90)
 S_TAB = (75, 125, 175, 250)
@@ -52,7 +54,7 @@ def job(args):
     hf.WORKERS = 1
     L_CELL = cell_of(a)
     n = int(round(L_CELL / H))
-    c = hf.Cell((n, n, 1), H)
+    c = hf.Cell((n, n, 1), H, sy=SY)
     mask = hf.rect_mask((n, n, 1), H, a, TH, 1)
     pl = hf.Plate(c, mask, hf.misfit(1))
     sth, sz = load_of(lk)
@@ -63,7 +65,7 @@ def job(args):
     np.savez_compressed(os.path.join(out, case + ".npz"), sig=pl.sig.reshape(sh).astype(np.float32),
                         ep=pl.ep.reshape(sh).astype(np.float32), p=pl.p.reshape(n, n).astype(np.float32),
                         mask=mask[:, :, 0])
-    json.dump(dict(case=case, a=a, alpha=al, load=lk, Sig=Sig, W=hist[-1]["W"], g=hist[-1]["W"] / hf.EPS_N,
+    json.dump(dict(case=case, a=a, alpha=al, load=lk, sy=SY, Sig=Sig, W=hist[-1]["W"], g=hist[-1]["W"] / hf.EPS_N,
                    s_plate=hist[-1]["s_plate"], pl_area=float((pl.p > 1e-4).sum() * H * H), h=H, L=L_CELL,
                    time_s=time.time() - t0), open(fn, "w"))
     print(case, "g", round(hist[-1]["W"] / hf.EPS_N, 1), "время", round(time.time() - t0), flush=True)
