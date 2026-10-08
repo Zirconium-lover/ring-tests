@@ -1,7 +1,8 @@
 """Калибровка кинетического движка с измеренным сдвигом температуры выпадения под нагрузкой (app_dT,
 Vizcaíno и др. 2014) и форой зёрен с осью c по радиусу (bias_dT) — по тем же мишеням, что calib_beta.py:
 RHF по изображению (Lepine) и доля длины под 45–135° (Cinbiz). Метрики — calib_beta.metrics.
-python calib_kin.py папка '{"bias_dT": [...], "B": [...], ...}' [процессов]"""
+python calib_kin.py папка '{"bias_dT": [...], "B": [...], ...}' [процессов]
+"init_auto": [true] — нерастворившиеся при T_max гидриды строятся, как в tool.simulate."""
 import os
 import sys
 import json
@@ -19,6 +20,24 @@ SIG = [0, 100, 125, 150, 175, 200, 250]
 BASE = dict(H_ppm=178.0, T_max=415.0, rate=3.0, B=80.0, Delta0=15.0, sigma_cap=180.0, app_dT=0.08)
 
 
+def init_plates_for(p):
+    """Нерастворившиеся гидриды, если водорода больше TSSD(T_max) — как в tool.simulate: исходная окружная
+    структура при полном водороде (последовательный автомат без нагрузки), остаются самые длинные пластинки
+    общей площадью, равной нерастворившейся доле."""
+    from ca_hydride import Params, run
+    from thermo import Cooling, area_fraction
+    th = Cooling(p.H_ppm, p.T_max, p.T_end, p.lines)
+    if th.frac_left <= 1e-5:
+        return None
+    base = dict(size_um=tuple(p.size_um), dx=p.dx, grain_um=tuple(p.grain_um), chi0=p.chi0, chi_s=p.chi_s,
+                E=p.E, nu=p.nu, seed=p.seed)
+    r0 = run(Params(**base, frac=float(area_fraction(p.H_ppm)), sigma_app=0.0))
+    P0 = np.array([[q["c"][0], q["c"][1], q["psi"], q["half"]] for q in r0["plates"]])
+    P0 = P0[np.lexsort((np.random.default_rng([p.seed, 3]).random(len(P0)), -P0[:, 3]))]
+    area = np.cumsum(2 * P0[:, 3] * p.h_um) / (p.size_um[0] * p.size_um[1])
+    return P0[: max(1, int(np.searchsorted(area, th.frac_left)))]
+
+
 def job(a):
     out, kw = a
     name = "_".join(f"{k}{v}" for k, v in sorted(kw.items()))
@@ -26,7 +45,10 @@ def job(a):
     if os.path.exists(fn):
         return
     t0 = time.time()
-    r = run_kinetic(KParams(**dict(BASE, **kw)))
+    kp = dict(BASE, **{k: v for k, v in kw.items() if k != "init_auto"})
+    if kw.get("init_auto"):                     # водород сверх TSSD(T_max) — в нерастворившихся гидридах
+        kp["init_plates"] = init_plates_for(KParams(**kp))
+    r = run_kinetic(KParams(**kp))
     m = metrics(r)
     new = [q for q in r["plates"] if not q.get("init")]
     m["T_first"] = new[0]["T"] if new else np.nan
