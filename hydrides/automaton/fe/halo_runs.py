@@ -13,7 +13,7 @@
 Ячейка 30 мкм, для коротких пластинок (a ≤ 1.25 мкм) — 15 мкм. Нагрузка — из hill_runs.LOADS или U<σθ>.
 python halo_runs.py папка случай[,случай...] [процессов]   (случай = a2.5_al0_U110: полудлина, угол, нагрузка)
 python halo_runs.py папка таблица [процессов]   — вся таблица для автомата (A_TAB × AL_TAB × S_TAB)
-HALO_SY=226 python halo_runs.py ...              — другой предел текучести (Э635)"""
+HALO_SY=226 HALO_S=75,125,175,200 python halo_runs.py ...   — Э635: другой предел текучести; нагрузки ниже него"""
 import os
 import sys
 import json
@@ -28,7 +28,7 @@ H, TH = 0.1, 0.6
 SY = float(os.environ.get("HALO_SY", 350.0))     # предел текучести матрицы: Zry-4 350, Э635 226 МПа (380 °C)
 A_TAB = (0.6, 0.9, 1.25, 1.75, 2.5)
 AL_TAB = (0, 30, 60, 90)
-S_TAB = (75, 125, 175, 250)
+S_TAB = tuple(int(x) for x in os.environ.get("HALO_S", "75,125,175,250").split(","))   # Э635 (σ_y 226): до 200
 
 
 def cell_of(a):
@@ -60,7 +60,12 @@ def job(args):
     sth, sz = load_of(lk)
     r = np.radians(al)
     Sig = [sth * np.sin(r) ** 2, sth * np.cos(r) ** 2, sz, 0.0, 0.0, np.sqrt(2) * sth * np.sin(r) * np.cos(r)]
-    hist = pl.run(Sig, nt=10)
+    try:
+        hist = pl.run(Sig, nt=10)
+    except TypeError:                               # решатель не сошёлся (нагрузка близка к пределу текучести)
+        json.dump(dict(case=case, failed=True, sy=SY, time_s=time.time() - t0), open(fn + ".failed", "w"))
+        print(case, "не сошлось", flush=True)
+        return case
     sh = (6, n, n)
     np.savez_compressed(os.path.join(out, case + ".npz"), sig=pl.sig.reshape(sh).astype(np.float32),
                         ep=pl.ep.reshape(sh).astype(np.float32), p=pl.p.reshape(n, n).astype(np.float32),
