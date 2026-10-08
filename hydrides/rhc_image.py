@@ -36,10 +36,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("img"); ap.add_argument("--um-per-px", type=float); ap.add_argument("--bar-um", type=float)
     ap.add_argument("--win-um", type=float, default=240.0); ap.add_argument("--crop")
-    ap.add_argument("--out")
+    ap.add_argument("--out"); ap.add_argument("--scales", default="1.5,3")
     a = ap.parse_args()
     crop = tuple(int(v) for v in a.crop.split(",")) if a.crop else None
-    res, D = hs.analyse(a.img, um=a.um_per_px, bar_um=a.bar_um, crop=crop, scales_um=(1.5, 3.0))
+    res, D = hs.analyse(a.img, um=a.um_per_px, bar_um=a.bar_um, crop=crop, scales_um=tuple(float(v) for v in a.scales.split(",")))
     um = D["um"]; hm = D["hm"]; hr = D["hm_rad"]
     out = dict(file=os.path.basename(a.img), um_per_px=um, strip_um=res["strip_um"], area_fraction=res["area_fraction"],
                win_um=a.win_um, any=rhc_of(hm, um, a.win_um), radial_only=rhc_of(hr, um, a.win_um))

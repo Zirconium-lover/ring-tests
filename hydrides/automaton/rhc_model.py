@@ -54,6 +54,28 @@ def load(fn, size_default=(240.0, 240.0), dx=0.4):
     return m, hyd, hyd_r, dx
 
 
+def as_micrograph(hyd, dx, etch_um, um_px, seed=0):
+    """Модель как серый снимок с пикселем um_px: оптическая маска с утолщением травлением, усреднение по пикселю
+    снимка, светлый металл и тёмный гидрид, лёгкий шум съёмки — дальше та же обработка, что у снимков."""
+    m = optical(hyd, dx, etch_um).astype(float)
+    k = um_px / UM
+    img = ndi.zoom(m, 1.0 / k, order=1) if k > 1 else m
+    rng = np.random.default_rng(seed)
+    return np.clip(0.88 - 0.7 * img + rng.normal(0, 0.03, img.shape), 0, 1)
+
+
+def rhc_spec(hyd, dx, etch_um, um_px):
+    """RHC модели через конвейер снимков (hydride_spec, поле без поверхностей) — для сравнения со снимком того же
+    разрешения."""
+    sys.path.insert(0, os.path.dirname(HERE))
+    import hydride_spec as hs
+    g = as_micrograph(hyd, dx, etch_um, um_px)
+    s1 = max(1.5, 2 * um_px)
+    res, D = hs.analyse("модель", um=um_px, field=True, g=g, scales_um=(s1, 2 * s1))
+    a = rhc_mask(D["hm"], um_px, periodic=False); b = rhc_mask(D["hm_rad"], um_px, periodic=False)
+    return dict(area=float(D["hm"].mean()), RHCP=a["RHCP"], RHCF=a["RHCF"], RHCP_rad=b["RHCP"], RHCF_rad=b["RHCF"])
+
+
 def rhc_of(hyd, hyd_r, dx, etch_um):
     m = optical(hyd, dx, etch_um); mr = optical(hyd_r, dx, etch_um)
     a = rhc_mask(m, UM); b = rhc_mask(mr, UM)
