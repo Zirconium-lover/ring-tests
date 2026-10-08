@@ -37,6 +37,9 @@ class KParams(Params):
     B: float = 40.0                 # барьер на линии TSSP, kT
     Delta0: float = 30.0            # избыток движущей силы на линии TSSP, МПа
     nu_c: float = 1e-6              # скорость зарождения в клетке на линии TSSP, 1/с
+    nuc_um: float = 0.0             # мкм: поле для зарождения усредняется по размеру зародыша (гаусс, σ = nuc_um);
+                                    # 0 — по клетке. 0.115 — как ячейка 0.4 мкм (σ = 0.4/√12): сетка не меняет пик у кромки
+    occ_um: float = 0.0             # мкм: запретная зона вокруг пластинок для новых зародышей; 0 — одна клетка
     nu_dx: float = 0.4              # мкм: ν_c задана для клетки такого размера; на другой сетке скорость
                                     # пересчитывается на площадь (тело зерна, ∝ dx²) и на длину (грань, ∝ dx),
                                     # чтобы соотношение мест «грань/тело» не зависело от сетки (0 — по клетке)
@@ -325,7 +328,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
                 a[sel] += fr * v
         d11, d22, d12, d33 = el.stress(*Ein)
         S11[:] += d11; S22[:] += d22; S12[:] += d12; S33[:] += d33
-        occ[:] = ndi.binary_dilation(hyd > 0.2, iterations=1)
+        occ[:] = ndi.binary_dilation(hyd > 0.2, iterations=max(1, int(round(p.occ_um / p.dx))) if p.occ_um > 0 else 1)
         return sink * C_HYD if deplete else 0.0
 
     # начальное состояние: растворилось до TSSD(T_max), остальное — нерастворившиеся пластинки
@@ -350,7 +353,11 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     hist = dict(t=[], T=[], c_mean=[], n=[], frac=[])
     while T > p.T_end:
         Tk = T + 273.15
-        g = (e11n * S11 + e22n * S22 + 2 * e12n * S12 + e33n * S33) / EPS_N * p.kappa
+        if p.nuc_um > 0:                                # поле, усреднённое по зародышу
+            Sn = [ndi.gaussian_filter(a, p.nuc_um / p.dx, mode="wrap") for a in (S11, S22, S12, S33)]
+        else:
+            Sn = (S11, S22, S12, S33)
+        g = (e11n * Sn[0] + e22n * Sn[1] + 2 * e12n * Sn[2] + e33n * Sn[3]) / EPS_N * p.kappa
         if p.cap_local_only:
             mtx = hyd < 0.2
             Sm = [float(a[mtx].mean()) for a in (S11, S22, S12, S33)]
@@ -368,7 +375,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         lnr[ok] = np.log(p.nu_c) + ln_cell - p.B * ((p.Delta0 / Delta[ok]) ** 2 - 1.0)
         if ngb:
             # межзёренные зародыши: та же формула, но ε* — для пластинки по следу грани
-            Sf = [a.ravel()[gcell] for a in (S11, S22, S12, S33)]
+            Sf = [a.ravel()[gcell] for a in Sn]
             g_gb = (ge11 * Sf[0] + ge22 * Sf[1] + 2 * ge12 * Sf[2] + e33n * Sf[3]) / EPS_N * p.kappa
             if p.cap_local_only:
                 gm = (ge11 * Sm[0] + ge22 * Sm[1] + 2 * ge12 * Sm[2] + e33n * Sm[3]) / EPS_N * p.kappa
