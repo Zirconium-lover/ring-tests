@@ -7,7 +7,7 @@
 (c̄ − TSSP при T на 10, 30, 60 °C ниже начала), их зависимость от скорости. Сравнить потом с
 Lacroix 2021 (TSSP — кинетическая линия) и Blackmur 2015.
 
-python dsc_model.py папка [процессов]
+python dsc_model.py папка [процессов] [варианты через запятую]
 """
 import json
 import os
@@ -23,7 +23,8 @@ from thermo import TSS, c_line, T_line  # noqa: E402
 
 BASE = dict(H_ppm=178.0, T_max=415.0, app_dT=0.08, bias_dT=15.0, gb=True, gb_dT=1.5, grow_kin=True,
             free_z=True, halo=True, cross_tol=15.0, sigma_cap=1e9, sigma_app=0.0)
-NUC = {"sharp": dict(B=80.0, Delta0=15.0), "soft": dict(B=80.0, Delta0=380.0)}
+NUC = {"sharp": dict(B=80.0, Delta0=15.0), "soft": dict(B=80.0, Delta0=380.0),
+       "sharp_ref": dict(B=80.0, Delta0=15.0, tssp_ref=True), "soft_ref": dict(B=80.0, Delta0=380.0, tssp_ref=True)}
 
 
 def job(a):
@@ -54,7 +55,8 @@ def job(a):
 if __name__ == "__main__":
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
-    jobs = [(out, n, r, s) for n in NUC for r in (0.3, 3.0, 30.0) for s in (1,)]
+    which = sys.argv[3].split(",") if len(sys.argv) > 3 else list(NUC)
+    jobs = [(out, n, r, s) for n in which for r in (0.3, 3.0, 30.0) for s in (1,)]
     with Pool(int(sys.argv[2]) if len(sys.argv) > 2 else 1) as pool:
         list(pool.imap_unordered(job, jobs))
     print("готово", len(jobs))

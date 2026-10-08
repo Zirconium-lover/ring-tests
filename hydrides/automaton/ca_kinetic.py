@@ -67,6 +67,8 @@ class KParams(Params):
                                     # Фурье вместо обрезки поля соседей; sigma_cap тогда — только предохранитель
     halo_step: float = 0.1          # мкм: ореол растущей пластинки обновляется, когда полудлина изменилась на столько
     halo_tab: str = ""              # путь к таблице ореолов (пусто — data_halo/halo_tab.npz)
+    tssp_ref: bool = False          # измеренная TSSP — начало выпадения в самых выгодных местах (грань в зерне
+                                    # окружного семейства): все сдвиги отсчитываются вниз на bias_dT + gb_dT
     cross_tol: float = 0.0          # град: упёршись в границу, кончик продолжается в соседнем зерне (или на
                                     # соседней грани), если след там отличается не больше (Fang 2017, Son 2026); 0 — нет
 
@@ -100,7 +102,8 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     lnc_gorsky = p.v_h_over_rt * sapp / 3.0 if p.v_h_over_rt else 0.0
     # измеренный сдвиг температуры выпадения: нормальное напряжение на пластинке σ_nn = σθ·sin²ψ и фора зёрен
     # с осью c по радиусу (cos²ψ), в градусах; в движущую силу (МПа) — через наклон линии TSSP: n_H·Q/T
-    dT_map = p.app_dT * sapp * np.sin(psi_map) ** 2 + p.bias_dT * np.cos(psi_map) ** 2
+    dT_ref = (p.bias_dT + (p.gb_dT if p.gb else 0.0)) if p.tssp_ref else 0.0
+    dT_map = p.app_dT * sapp * np.sin(psi_map) ** 2 + p.bias_dT * np.cos(psi_map) ** 2 - dT_ref
     dTg = np.zeros(len(gpsi))
     if p.dT_s > 0:                      # свой генератор: зёрна и остальные случайные числа не меняются
         dTg = np.random.default_rng([p.seed, 11]).normal(0.0, p.dT_s, len(gpsi))
@@ -123,7 +126,8 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         dTs = np.random.default_rng([p.seed, 7]).normal(0.0, p.gb_dT_s, len(uniq))[gpid] if p.gb_dT_s > 0 else 0.0
         sg = sapp.ravel()[gcell]
         # разброс по зёрнам — и на грани: от зерна, с которым у гидрида соотношение ориентаций
-        dT_gb = p.app_dT * sg * np.sin(gpsi_f) ** 2 + p.bias_dT * np.cos(gpsi_f) ** 2 + p.gb_dT + dTs + dTg[gmatch]
+        dT_gb = p.app_dT * sg * np.sin(gpsi_f) ** 2 + p.bias_dT * np.cos(gpsi_f) ** 2 + p.gb_dT + dTs + dTg[gmatch] \
+            - dT_ref
         ge11, ge22, ge12 = eigen_components_for(gpsi_f)
         if p.app_dT > 0:
             g_app_gb = np.zeros(ngb)
