@@ -11,7 +11,7 @@
 Мера Плясова: F_l — доля длины гидридов, отклонённых от радиуса не больше чем на 45°, по оптическому
 снимку (SIAMS), учитываются гидриды длиннее 5–10 мкм. До опыта F_l ≈ 0.10.
 
-python e635_plyasov.py папка m1|m2|zry [процессов]
+python e635_plyasov.py папка m1|m2|m2H|ring|zry [процессов]
 """
 import json
 import os
@@ -45,34 +45,39 @@ def f_l(res, min_len_um=(5.0, 10.0), um=0.5, blur_um=1.0, level=0.25):
     if n == 0:
         return {f"F_l_{m:g}": np.nan for m in min_len_um}
     idx = ndi.find_objects(lab)
-    L, rad = [], []
+    L, rad, yc = [], [], []
     for k, sl in enumerate(idx, start=1):
         ys, xs = np.nonzero(lab[sl] == k)
         if len(ys) < 3:
             continue
+        yc.append((ys.mean() + sl[0].start) / lab.shape[0])
         P = np.stack([ys * um, xs * um], 1); P -= P.mean(0)
         w, v = np.linalg.eigh(P.T @ P)
         ax = v[:, -1]                                   # главная ось (y, x)
         proj = P @ ax
         L.append(proj.max() - proj.min() + um)
         rad.append(abs(ax[0]) >= np.cos(np.radians(45)))    # к радиусу (ND) ближе 45°
-    L, rad = np.array(L), np.array(rad)
+    L, rad, yc = np.array(L), np.array(rad), np.array(yc)
     out = {}
     for m in min_len_um:
         sel = L >= m
         out[f"F_l_{m:g}"] = float((L[sel] * rad[sel]).sum() / L[sel].sum()) if sel.any() else np.nan
         out[f"n_obj_{m:g}"] = int(sel.sum())
+        # по третям стенки (строка 0 — наружная поверхность), как табл. 1 Плясова: по центру объекта
+        for i, name in enumerate(("out", "mid", "in")):
+            b = sel & (yc >= i / 3) & (yc < (i + 1) / 3)
+            out[f"F_l_{m:g}_{name}"] = float((L[b] * rad[b]).sum() / L[b].sum()) if b.any() else np.nan
     return out
 
 
 def job(a):
     out, kw = a
-    name = "_".join(f"{k}{v}" for k, v in sorted(kw.items()))
+    name = "_".join(f"{k}{v}" for k, v in sorted(kw.items()) if k not in ("sigma_prof", "chi0_profile", "size_um"))
     fn = os.path.join(out, name + ".json")
     if os.path.exists(fn):
         return
     t0 = time.time()
-    kp = dict(BASE, **kw)
+    kp = dict(BASE, **{k: v for k, v in kw.items() if k != "ring"})
     p = KParams(**kp)
     if p.H_ppm > 0:
         init = init_plates_for(p)
@@ -104,6 +109,15 @@ def cases(mode):
         b = float(os.environ.get("E635_BIAS", "8.0"))
         return [dict(H_ppm=h, rate=0.5, bias_dT=b, sigma_app=s, sigma_T0=400.0, seed=1)
                 for h in (150.0, 300.0, 400.0) for s in (50, 90, 140)]
+    if mode == "ring":     # кольцо целиком: профиль σ по толщине (рис. 8, 9 при 400 °C), F_l по третям (табл. 1)
+        prof = {"S1_0": ((0.0, 63.0), (1.0, -31.0)),                       # 200 Н, участок 0°: наружная растянута
+                "S1_90": ((0.0, -130.0), (0.8, 195.0), (1.0, 215.0)),      # 200 Н, 90°: внутренняя, пласт. полка
+                "S2_0": ((0.0, 81.0), (1.0, -15.0)),                        # 350 Н, 0° (рис. 9б, наклон 115 МПа/мм)
+                "S2_90": ((0.0, -220.0), (0.63, 220.0), (1.0, 220.0))}      # 350 Н, 90°: оценка ×1.75 с пределом
+        Hs = {"S1": 152.0, "S2": 168.0}
+        return [dict(H_ppm=Hs[k[:2]], rate=0.75, bias_dT=b, sigma_prof=v, ring=k, size_um=(850.0, 240.0),
+                     chi0_profile=(38.3, 38.7, 32.8), seed=1)
+                for b in (5.0, 8.0) for k, v in prof.items()]
     if mode == "zry":      # для сравнения: фора холоднодеформированного Zircaloy-4 (17 °C) на Э635
         return [dict(H_ppm=210.0, rate=0.5, bias_dT=17.0, sigma_app=s, sigma_T0=400.0, seed=1)
                 for s in (0, 50, 90, 140)]

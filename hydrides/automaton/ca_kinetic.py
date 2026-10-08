@@ -76,6 +76,8 @@ class KParams(Params):
                                     # Фурье вместо обрезки поля соседей; sigma_cap тогда — только предохранитель
     halo_step: float = 0.1          # мкм: ореол растущей пластинки обновляется, когда полудлина изменилась на столько
     halo_tab: str = ""              # путь к таблице ореолов (пусто — data_halo/halo_tab.npz)
+    sigma_prof: tuple = ()          # профиль окружного напряжения по толщине: ((доля от наружной поверхности, σ МПа), ...);
+                                    # вместо sigma_app + sigma_app_grad (кольца на пальцах, Плясов 2023, рис. 8)
     sigma_T0: float = 0.0           # °C: напряжение задано при этой температуре и при охлаждении спадает как
                                     # (T + 273)/(T0 + 273) — давление газа в запаянной трубе (Плясов 2023); 0 — постоянное
     tssp_ref: bool = False          # измеренная TSSP — начало выпадения в самых выгодных местах (грань в зерне
@@ -105,7 +107,11 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     e11n, e22n, e12n = eigen_components_for(psi_map)
     e33n = EPS_T
     yfrac = (np.arange(ny) + 0.5) / ny
-    sapp = (p.sigma_app + p.sigma_app_grad * (0.5 - yfrac))[:, None] * np.ones((1, nx))
+    if p.sigma_prof:
+        yp, sp = np.array(p.sigma_prof, float).T
+        sapp = np.interp(yfrac, yp, sp)[:, None] * np.ones((1, nx))
+    else:
+        sapp = (p.sigma_app + p.sigma_app_grad * (0.5 - yfrac))[:, None] * np.ones((1, nx))
     e_mean = 0.5 * (EPS_N + EPS_T)
     g_app = sapp * (e11n - e_mean) / EPS_N
     if p.app_dg is not None:            # вклад нагрузки по МКЭ (fe/hill_table.json), как в ca_hydride
@@ -299,6 +305,19 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     kx = 2 * np.pi * np.fft.rfftfreq(nx, p.dx)[None, :]
     k2 = kx ** 2 + ky ** 2
 
+    halo_tabs = {}
+
+    def halo_local(c):
+        """Ореол по местному напряжению (профиль по толщине): таблица на ближайшем уровне через 25 МПа;
+        при сжатии — как без нагрузки."""
+        s_loc = float(sapp[int(c[0] / p.dx) % ny, 0])
+        key = int(round(max(s_loc, 0.0) / 25.0) * 25)
+        if key not in halo_tabs:
+            from halo import HaloTable
+            halo_tabs[key] = HaloTable(**(dict(path=p.halo_tab) if p.halo_tab else {}))
+            halo_tabs[key].set_load(float(key))
+        return halo_tabs[key]
+
     def halo_update(pids, table=None):
         """Ореолы пластинок pids (новых или подросших на halo_step): прежний вычитается, новый — по текущей
         длине; возвращает добавки собственной деформации для add_batch."""
@@ -310,7 +329,8 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
                 continue
             if old is not None:
                 out.append((old[0], old[1], old[2], -1.0))
-            ys, xs, comps = (table or ht).patch((ny, nx), p.dx, q_["c"], q_["psi"], q_["half"])
+            tab = table or (halo_local(q_["c"]) if p.sigma_prof else ht)
+            ys, xs, comps = tab.patch((ny, nx), p.dx, q_["c"], q_["psi"], q_["half"])
             halos[pid] = (ys, xs, comps, q_["half"])
             out.append((ys, xs, comps, 1.0))
         return out
