@@ -26,9 +26,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from plate_fe import run_ccx, EPS_N, EPS_T  # noqa: E402
 from hill_runs import LOADS  # noqa: E402
 
-L, A_HALF, TH, T_LAYER = 30.0, 2.5, 0.6, 0.1
-E, NU, SY, HARD = 90e3, 0.34, 350.0, 200.0
-STEP = {"deck": (2.5, 1.2), "chain": (5.8, 0.6)}
+# STACK_L, STACK_A, STACK_SY — ячейка, полудлина пластинки, предел текучести (по умолчанию — Zry-4, как раньше);
+# side / deck09 / chain26 — расположения для проверки ореолов у предела текучести (halo_yield_check.py)
+L = float(os.environ.get("STACK_L", 30.0)); A_HALF = float(os.environ.get("STACK_A", 2.5)); TH, T_LAYER = 0.6, 0.1
+E, NU, SY, HARD = 90e3, 0.34, float(os.environ.get("STACK_SY", 350.0)), 200.0
+STEP = {"deck": (2.5, 1.2), "chain": (5.8, 0.6), "side": (0.0, 1.6), "deck09": (0.9, 1.2), "chain26": (2.6, 0.0)}
 
 
 def plates_of(conf):
