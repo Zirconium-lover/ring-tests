@@ -58,6 +58,8 @@ class KParams(Params):
     app_dT: float = 0.0             # °C/МПа: сдвиг температуры выпадения на 1 МПа нормального к пластинке
                                     # напряжения (Vizcaíno и др. 2014: 0.08 ± 0.02 в зёрнах с осью c вдоль нагрузки);
                                     # > 0 — заменяет упругий вклад нагрузки (g_app) этим измеренным
+    app_center: bool = False        # сдвиг от нагрузки ∝ (sin²ψ − ½): радиальным фора, окружным штраф, в среднем
+                                    # выделение не ускоряется (Lacroix 2021: под 200 МПа TSSP не выше, K_N тот же)
     bias_dT: float = 0.0            # °C: фора выпадения в зёрнах с осью c по радиусу (∝ cos²ψ) — плотность
                                     # дислокаций зависит от ориентации зерна (Vizcaíno: 5 °C между семействами зёрен)
     # межзёренный канал: пластинка вдоль грани зерна, след грани не дальше gb_tol от базисного следа одного
@@ -121,7 +123,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     # измеренный сдвиг температуры выпадения: нормальное напряжение на пластинке σ_nn = σθ·sin²ψ и фора зёрен
     # с осью c по радиусу (cos²ψ), в градусах; в движущую силу (МПа) — через наклон линии TSSP: n_H·Q/T
     dT_ref = (p.bias_dT + (p.gb_dT if p.gb else 0.0)) if p.tssp_ref else 0.0
-    dT_app = p.app_dT * sapp * np.sin(psi_map) ** 2              # доля от нагрузки (масштабируется при sigma_T0)
+    dT_app = p.app_dT * sapp * (np.sin(psi_map) ** 2 - (0.5 if p.app_center else 0.0))   # масштабируется при sigma_T0
     dT_map = dT_app + p.bias_dT * np.cos(psi_map) ** 2 - dT_ref
     dTg = np.zeros(len(gpsi))
     if p.dT_s > 0:                      # свой генератор: зёрна и остальные случайные числа не меняются
@@ -145,7 +147,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         dTs = np.random.default_rng([p.seed, 7]).normal(0.0, p.gb_dT_s, len(uniq))[gpid] if p.gb_dT_s > 0 else 0.0
         sg = sapp.ravel()[gcell]
         # разброс по зёрнам — и на грани: от зерна, с которым у гидрида соотношение ориентаций
-        dT_gb_app = p.app_dT * sg * np.sin(gpsi_f) ** 2
+        dT_gb_app = p.app_dT * sg * (np.sin(gpsi_f) ** 2 - (0.5 if p.app_center else 0.0))
         dT_gb = dT_gb_app + p.bias_dT * np.cos(gpsi_f) ** 2 + p.gb_dT + dTs + dTg[gmatch] - dT_ref
         ge11, ge22, ge12 = eigen_components_for(gpsi_f)
         if p.app_dT > 0:
