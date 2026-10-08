@@ -33,6 +33,8 @@ class KParams(Params):
     T_max: float = 415.0            # °C
     T_end: float = 100.0            # °C — ниже почти весь водород уже выпал
     rate: float = 3.0               # скорость охлаждения, °C/мин
+    rate2: float = 0.0              # °C/мин ниже T_rate2 (двухступенчатое охлаждение Desquines 2014: 5 → 0.4); 0 — нет
+    T_rate2: float = 0.0            # °C
     lines: str = "E635"             # линии растворимости (thermo.TSS)
     B: float = 40.0                 # барьер на линии TSSP, kT
     Delta0: float = 30.0            # избыток движущей силы на линии TSSP, МПа
@@ -403,6 +405,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         D = p.D0 * np.exp(-p.QD / (8.314 * Tk)) * 1e12   # мкм²/с
         rad_um = np.sqrt(2 * D * p.t_grow)
         c_eq = c_line(T, L["TSSD"])
+        q = (p.rate2 if (p.rate2 > 0 and T <= p.T_rate2) else p.rate) / 60.0
         dt = p.dT_max / q
         lam_tot = 0.0
         if ok.any() or ok_gb.any():
