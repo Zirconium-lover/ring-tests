@@ -18,7 +18,7 @@ from scipy import ndimage as ndi
 
 
 class Plasticity:
-    def __init__(self, el, shape, sy, hard, E=90e3, nu=0.34, wmax=96, margin=6):
+    def __init__(self, el, shape, sy, hard, E=90e3, nu=0.34, wmax=160, margin=6):
         self.el, self.sy, self.hard = el, float(sy), float(hard)
         self.mu = E / (2.0 * (1.0 + nu))
         self.shape = shape

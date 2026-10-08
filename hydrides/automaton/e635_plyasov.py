@@ -30,10 +30,13 @@ from ca_kinetic import KParams, run_kinetic  # noqa: E402
 from ca_analysis import render  # noqa: E402
 from calib_beta import metrics  # noqa: E402
 from calib_kin import init_plates_for  # noqa: E402
+from connectivity import rhc_mask  # noqa: E402
 
 BASE = dict(lines="E635", T_max=400.0, T_end=100.0, chi0=39.0, chi_s=26.0, grain_um=(5.0, 5.0),
             B=80.0, Delta0=15.0, app_dT=0.08, gb=True, gb_dT=1.5, grow_kin=True, free_z=True, halo=True,
             halo_tab=os.path.join(HERE, "data_halo", "halo_tab_e635.npz"), cross_tol=15.0, sigma_cap=1e9)
+if os.environ.get("E635_PLAST", "0") == "1":      # коллективная пластичность матрицы вместо таблиц ореолов
+    BASE.update(halo=False, plast=True, plast_sy=226.0)
 
 
 def f_l(res, min_len_um=(5.0, 10.0), um=0.5, blur_um=1.0, level=0.25, n_prof=12):
@@ -73,6 +76,8 @@ def f_l(res, min_len_um=(5.0, 10.0), um=0.5, blur_um=1.0, level=0.25, n_prof=12)
             b = sel & (yc >= i / n_prof) & (yc < (i + 1) / n_prof)
             prof.append(float((L[b] * rad[b]).sum() / L[b].sum()) if b.any() else np.nan)
         out[f"F_l_{m:g}_prof"] = prof
+    # RHC (непрерывность через толщину поля) по той же «оптической» маске, что и F_l
+    out.update(rhc_mask(img > level, um, periodic=True))
     return out
 
 
@@ -108,6 +113,9 @@ def cases(mode):
     if mode == "m1":       # кольца: постоянная нагрузка, ~160 ppm, 0.75 °C/мин; подбор форы по порогу 45 МПа
         return [dict(H_ppm=160.0, rate=0.75, bias_dT=b, sigma_app=s, seed=sd)
                 for b in (1.0, 3.0, 5.0, 8.0) for s in (0, 30, 45, 60, 90) for sd in (1,)]
+    if mode == "m1p":      # то же с коллективной пластичностью (E635_PLAST=1): фора заново
+        return [dict(H_ppm=160.0, rate=0.75, bias_dT=b, sigma_app=s, seed=1)
+                for b in (1.0, 2.0, 3.0, 5.0) for s in (0, 30, 45, 60, 90)]
     if mode == "m2":       # трубы под давлением: напряжение задано при 400 °C и спадает; фора — из m1
         b = float(os.environ.get("E635_BIAS", "3.0"))
         return [dict(H_ppm=210.0, rate=0.5, bias_dT=b, sigma_app=s, sigma_T0=400.0, seed=sd)

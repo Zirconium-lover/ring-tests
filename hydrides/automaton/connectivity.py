@@ -109,6 +109,34 @@ def rhcp(mask, dx, eps=1.0 / 50.0, coarsen_um=0.8):
     return float(max(0.0, (1.0 - c_min / H) / (1.0 - eps)))
 
 
+def rhc_mask(mask, um, periodic=True, eps=1.0 / 50.0, coarsen_um=0.8):
+    """RHC по бинарной маске гидридов «как на снимке» (строки — толщина, сверху вниз), пиксель um мкм:
+    RHCP — путь трещины наименьшей цены (PROPHET: гидрид в 50 раз дешевле металла), RHCF — наибольшая
+    протяжённость связного кластера (8-связность) по толщине, доля толщины. Одна и та же функция для модели
+    (маска оптического изображения) и для снимков; periodic — поле периодично по дуге (модель)."""
+    m = np.asarray(mask, bool)
+    k = max(1, int(round(coarsen_um / um)))
+    ny, nx = m.shape
+    mc = m[: ny // k * k, : nx // k * k].reshape(ny // k, k, nx // k, k).mean(axis=(1, 3)) > 0.25
+    H, W = mc.shape
+    cost = np.where(mc, eps, 1.0)
+    if periodic:
+        cost3 = np.concatenate([cost, cost, cost], axis=1); j0, j1 = W, 2 * W
+    else:
+        cost3 = cost; j0, j1 = 0, W
+    mcp = MCP_Geometric(cost3, fully_connected=True)
+    costs, _ = mcp.find_costs([(0, x) for x in range(j0, j1)])
+    c_min = float(costs[-1, j0:j1].min()) + 0.5 * float(cost3[0, j0:j1].min())
+    rhcp_v = float(min(1.0, max(0.0, (1.0 - c_min / H) / (1.0 - eps))))
+    tiled = np.concatenate([m, m], axis=1) if periodic else m
+    lab, n = ndi.label(tiled, structure=np.ones((3, 3)))
+    ext = 0
+    for s_ in ndi.find_objects(lab):
+        if s_ is not None and (not periodic or s_[1].start < nx):
+            ext = max(ext, s_[0].stop - s_[0].start)
+    return dict(RHCP=rhcp_v, RHCF=float(ext / ny))
+
+
 def metrics_of(plates, shape, dx, h_um=0.6, band_um=100.0, gap_um=1.0, hyd=None):
     if hyd is None:
         hyd = field_from_plates(plates, shape, dx, h_um)
