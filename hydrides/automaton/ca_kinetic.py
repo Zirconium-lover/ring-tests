@@ -61,6 +61,12 @@ class KParams(Params):
     halo_cap: float = 0.0           # предел суммарной пластической деформации ореолов в клетке (эквивалентная, по
                                     # Мизесу); 0 — без предела. Ореолы соседей складываются линейно, а пластическая
                                     # зона скопления — не сумма зон: в рое из сотен пластинок сумма уходит за десятки %
+    plast: bool = False             # коллективная пластичность матрицы (plast.py) вместо таблиц ореолов (halo):
+                                    # ε_p — поле, после каждого решения упругой задачи — до равновесия по Мизесу
+    plast_sy: float = 226.0         # предел текучести матрицы, МПа (Э635 ~380 °C; Zry-4 — 350)
+    plast_h: float = 200.0          # линейное упрочнение, МПа на единицу ε_p (как в таблицах ореолов)
+    plast_tol: float = 5.0          # допуск превышения текучести, МПа
+    plast_maxit: int = 100
     halo_smax: float = 0.0          # ореолы — из таблицы при нагрузке не выше этой (МПа); 0 — без предела
     app_center: bool = False        # сдвиг от нагрузки ∝ (sin²ψ − ½): радиальным фора, окружным штраф, в среднем
                                     # выделение не ускоряется (Lacroix 2021: под 200 МПа TSSP не выше, K_N тот же)
@@ -104,6 +110,10 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         grains, gpsi = make_grains(p, rng)
     ny, nx = grains.shape
     el = Elastic((ny, nx), p.dx, p.E, p.nu, free_z=p.free_z)
+    if p.plast:
+        from plast import Plasticity
+        pm = Plasticity(el, (ny, nx), p.plast_sy, p.plast_h, p.E, p.nu)
+    fac_now = [1.0]                                     # доля нагрузки (спад с T при sigma_T0) — для текучести
     if p.halo:
         from halo import HaloTable
         kw_h = dict(path=p.halo_tab) if p.halo_tab else {}
@@ -398,6 +408,8 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         for a in Epend:
             a.fill(0.0)
         occ[:] = ndi.binary_dilation(hyd > 0.2, iterations=max(1, int(round(p.occ_um / p.dx))) if p.occ_um > 0 else 1)
+        if p.plast:                                     # пластика матрицы до равновесия при текущей нагрузке
+            pm.relax([S11, S22, S12, S33], hyd < 0.5, sapp * fac_now[0], p.plast_tol, p.plast_maxit)
         pend[0] = False
         gcache.clear()
 
@@ -457,6 +469,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         Tk = T + 273.15
         # напряжение газа в запаянной трубе спадает с абсолютной температурой
         fac = min(1.0, Tk / (p.sigma_T0 + 273.15)) if p.sigma_T0 > 0 else 1.0
+        fac_now[0] = fac
         if p.halo and p.sigma_T0 > 0 and abs(fac - fac_halo) > 0.01:
             ht.set_load(hs(p.sigma_app * fac)); fac_halo = fac
         if not gcache:
@@ -600,4 +613,5 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     if p.grow_kin:
         plates = [q_ for q_ in plates if q_["init"] or q_["half"] >= 0.5 * p.dx]
     return dict(params=p, plates=plates, hyd=hyd, grains=grains, gpsi=gpsi, S=(S11, S22, S12, S33),
-                c=c, hist={k: np.array(v) for k, v in hist.items()})
+                c=c, hist={k: np.array(v) for k, v in hist.items()},
+                **(dict(p_plast=pm.p, plast_its=list(pm.its)) if p.plast else {}))

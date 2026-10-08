@@ -19,7 +19,8 @@ if __name__ == "__main__":
     base = dict(base, size_um=(850.0, 120.0))
     sets = {"A": [dict(), dict(app_center=True), dict(halo=False), dict(app_center=True, halo=False)],
             "cap": [dict(halo_cap=0.14), dict(halo_cap=0.072)],
-            "smax": [dict(halo_smax=150.0), dict(halo_smax=100.0)]}
+            "smax": [dict(halo_smax=150.0), dict(halo_smax=100.0)],
+            "plast": [dict(halo=False, plast=True)]}
     var = sets[os.environ.get("DIAG_SET", "A")]
     with Pool(int(sys.argv[3]) if len(sys.argv) > 3 else 4) as pool:
         list(pool.imap_unordered(E.job, [(out, dict(base, **v)) for v in var]))
