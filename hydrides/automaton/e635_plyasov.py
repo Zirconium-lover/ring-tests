@@ -100,6 +100,10 @@ def cases(mode):
         b = float(os.environ.get("E635_BIAS", "3.0"))
         return [dict(H_ppm=210.0, rate=0.5, bias_dT=b, sigma_app=s, sigma_T0=400.0, seed=sd)
                 for s in (0, 50, 70, 90, 110, 140) for sd in (1, 2)]
+    if mode == "m2H":      # полка F_l от водорода: у Плясова трубы 150–450 ppm, на графике водород не указан
+        b = float(os.environ.get("E635_BIAS", "8.0"))
+        return [dict(H_ppm=h, rate=0.5, bias_dT=b, sigma_app=s, sigma_T0=400.0, seed=1)
+                for h in (150.0, 300.0, 400.0) for s in (50, 90, 140)]
     if mode == "zry":      # для сравнения: фора холоднодеформированного Zircaloy-4 (17 °C) на Э635
         return [dict(H_ppm=210.0, rate=0.5, bias_dT=17.0, sigma_app=s, sigma_T0=400.0, seed=1)
                 for s in (0, 50, 90, 140)]
