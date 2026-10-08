@@ -74,6 +74,8 @@ class KParams(Params):
                                     # Фурье вместо обрезки поля соседей; sigma_cap тогда — только предохранитель
     halo_step: float = 0.1          # мкм: ореол растущей пластинки обновляется, когда полудлина изменилась на столько
     halo_tab: str = ""              # путь к таблице ореолов (пусто — data_halo/halo_tab.npz)
+    sigma_T0: float = 0.0           # °C: напряжение задано при этой температуре и при охлаждении спадает как
+                                    # (T + 273)/(T0 + 273) — давление газа в запаянной трубе (Плясов 2023); 0 — постоянное
     tssp_ref: bool = False          # измеренная TSSP — начало выпадения в самых выгодных местах (грань в зерне
                                     # окружного семейства): все сдвиги отсчитываются вниз на bias_dT + gb_dT
     cross_tol: float = 0.0          # град: упёршись в границу, кончик продолжается в соседнем зерне (или на
@@ -110,7 +112,8 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     # измеренный сдвиг температуры выпадения: нормальное напряжение на пластинке σ_nn = σθ·sin²ψ и фора зёрен
     # с осью c по радиусу (cos²ψ), в градусах; в движущую силу (МПа) — через наклон линии TSSP: n_H·Q/T
     dT_ref = (p.bias_dT + (p.gb_dT if p.gb else 0.0)) if p.tssp_ref else 0.0
-    dT_map = p.app_dT * sapp * np.sin(psi_map) ** 2 + p.bias_dT * np.cos(psi_map) ** 2 - dT_ref
+    dT_app = p.app_dT * sapp * np.sin(psi_map) ** 2              # доля от нагрузки (масштабируется при sigma_T0)
+    dT_map = dT_app + p.bias_dT * np.cos(psi_map) ** 2 - dT_ref
     dTg = np.zeros(len(gpsi))
     if p.dT_s > 0:                      # свой генератор: зёрна и остальные случайные числа не меняются
         dTg = np.random.default_rng([p.seed, 11]).normal(0.0, p.dT_s, len(gpsi))
@@ -133,8 +136,8 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         dTs = np.random.default_rng([p.seed, 7]).normal(0.0, p.gb_dT_s, len(uniq))[gpid] if p.gb_dT_s > 0 else 0.0
         sg = sapp.ravel()[gcell]
         # разброс по зёрнам — и на грани: от зерна, с которым у гидрида соотношение ориентаций
-        dT_gb = p.app_dT * sg * np.sin(gpsi_f) ** 2 + p.bias_dT * np.cos(gpsi_f) ** 2 + p.gb_dT + dTs + dTg[gmatch] \
-            - dT_ref
+        dT_gb_app = p.app_dT * sg * np.sin(gpsi_f) ** 2
+        dT_gb = dT_gb_app + p.bias_dT * np.cos(gpsi_f) ** 2 + p.gb_dT + dTs + dTg[gmatch] - dT_ref
         ge11, ge22, ge12 = eigen_components_for(gpsi_f)
         if p.app_dT > 0:
             g_app_gb = np.zeros(ngb)
@@ -349,11 +352,16 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
             add_batch([], deplete=False, extra=halo_update(range(len(plates)), ht0))
     T, t = p.T_max, 0.0
     q = p.rate / 60.0                                   # °C/с
+    fac_halo = 1.0
     ln_cell = 2 * np.log(p.dx / p.nu_dx) if p.nu_dx > 0 else 0.0      # тело: места ∝ площади клетки
     ln_gbcell = np.log(p.dx / p.nu_dx) if p.nu_dx > 0 else 0.0        # грань: места ∝ длине грани в клетке
     hist = dict(t=[], T=[], c_mean=[], n=[], frac=[])
     while T > p.T_end:
         Tk = T + 273.15
+        # напряжение газа в запаянной трубе спадает с абсолютной температурой
+        fac = min(1.0, Tk / (p.sigma_T0 + 273.15)) if p.sigma_T0 > 0 else 1.0
+        if p.halo and p.sigma_T0 > 0 and abs(fac - fac_halo) > 0.01:
+            ht.set_load(p.sigma_app * fac); fac_halo = fac
         if p.nuc_um > 0:                                # поле, усреднённое по зародышу
             Sn = [ndi.gaussian_filter(a, p.nuc_um / p.dx, mode="wrap") for a in (S11, S22, S12, S33)]
         else:
@@ -370,7 +378,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
             g = g + p.g_extra
         lnc = np.log(np.clip(c, 1e-6, None)) + lnc_gorsky
         Delta = p.Delta0 + N_H_MPa_per_K * Tk * (lnc - np.log(c_line(T, L["TSSP"]))) + EPS_N * g \
-            + N_H_MPa_per_K * Q_over_R / Tk * dT_map
+            + N_H_MPa_per_K * Q_over_R / Tk * (dT_map + (fac - 1.0) * dT_app)
         ok = (Delta > 0) & ~occ & ~tried
         lnr = np.full((ny, nx), -np.inf)
         lnr[ok] = np.log(p.nu_c) + ln_cell - p.B * ((p.Delta0 / Delta[ok]) ** 2 - 1.0)
@@ -386,7 +394,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
             if p.g_extra is not None:
                 g_gb = g_gb + np.asarray(p.g_extra).ravel()[gcell]
             Delta_gb = p.Delta0 + N_H_MPa_per_K * Tk * (lnc.ravel()[gcell] - np.log(c_line(T, L["TSSP"]))) \
-                + EPS_N * g_gb + N_H_MPa_per_K * Q_over_R / Tk * dT_gb
+                + EPS_N * g_gb + N_H_MPa_per_K * Q_over_R / Tk * (dT_gb + (fac - 1.0) * dT_gb_app)
             ok_gb = (Delta_gb > 0) & ~occ.ravel()[gcell] & ~tried_gb
             lnr_gb = np.full(ngb, -np.inf)
             lnr_gb[ok_gb] = np.log(p.nu_c) + ln_gbcell - p.B * ((p.Delta0 / Delta_gb[ok_gb]) ** 2 - 1.0)
