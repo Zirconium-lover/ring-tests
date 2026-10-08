@@ -50,7 +50,27 @@ def main():
             print(f"базис/призма {rb:3.1f} пирамида/призма {rp:3.1f} {name:11s} остаток: окр {f_res['circ']:7.1f} "
                   f"рад {f_res['rad']:7.1f}  рад−окр {r['d_res']:7.1f}  (на 100 МПа нагрузки прохода)", flush=True)
     hist = history(e, fam)
-    json.dump(dict(passes=out, history=hist), open(os.path.join(HERE, "vsc_fab.json"), "w"), indent=1)
+    lit = literature()
+    json.dump(dict(passes=out, history=hist, literature=lit), open(os.path.join(HERE, "vsc_fab.json"), "w"), indent=1)
+
+
+def literature():
+    """Отношения τc по литературе: Holden и др. 2002 (Pang): призма 90, базис 160, пирамида 240 МПа;
+    Turner & Tomé 1994: призма 110, пирамида 247.5 (базис не активен — берём 5). α по Turner & Tomé."""
+    cax = texture(600, seed=3)
+    e = ESC(cax, ZR_C["RT"], ZR_A["turner"])
+    fam, _ = families(cax)
+    out = []
+    for name, (rb, rp) in {"Holden2002": (160 / 90, 240 / 90), "Turner1994": (5.0, 2.25)}.items():
+        cr = Creep(e, dict(prism=1.0, basal=rb, pyr=rp), n=20.0)
+        for pname, S in {"pilger": np.diag([-50.0, -100.0, 50.0]), "thin_elong": np.diag([0.0, -100.0, 100.0])}.items():
+            eta, _ = cr.run(t2m(S), eps_target=5e-3, nrec=5)
+            f = fam_stats(e, fam, solve_eig(e, np.zeros(6), eta))
+            out.append(dict(set=name, basal=rb, pyr=rp, path=pname, d_res=f["rad"] - f["circ"], residual=f))
+            print(f"{name:10s} {pname:10s} остаток рад − окр {f['rad'] - f['circ']:6.1f} МПа на 100 МПа прохода", flush=True)
+    th = fam_stats(e, fam, solve_eig(e, np.zeros(6), np.einsum("g,gi->gi", np.full(len(cax), -100.0), e.ag)))
+    print(f"тепловое (α Turner), охлаждение на 100 K: рад − окр {th['rad'] - th['circ']:.1f} МПа", flush=True)
+    return dict(passes=out, thermal_100K=th)
 
 
 def history(e, fam, sig_pass=500.0, keep=0.5):
@@ -77,4 +97,7 @@ def history(e, fam, sig_pass=500.0, keep=0.5):
 
 
 if __name__ == "__main__":
-    main()
+    if "--lit" in sys.argv:
+        literature()
+    else:
+        main()
