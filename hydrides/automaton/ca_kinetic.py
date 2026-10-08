@@ -155,6 +155,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         else:
             g_app_gb = sg * (ge11 - e_mean) / EPS_N
         tried_gb = np.zeros(ngb, bool)
+        noroom_gb = np.zeros(ngb, bool)
         L_gb = p.gb_L_max if p.gb_L_max > 0 else p.L_max
 
         def grow_gb(k, occ_b):
@@ -185,6 +186,8 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     occ = np.zeros((ny, nx), bool)
     hyd = np.zeros((ny, nx))
     tried = np.zeros((ny, nx), bool)
+    noroom = np.zeros((ny, nx), bool)          # пластинка L_min не помещается; занятость только растёт — навсегда
+    need_H = p.L_min * C_HYD * p.h_um / p.dx ** 2   # ppm·клетка сверх TSSD рядом — на пластинку L_min
     plates = []
     owner = np.full((ny, nx), -1, np.int32)     # номер пластинки в клетке (рост во времени)
     tips = []                                   # растущие пластинки: концы A (−t), B (+t), активность концов
@@ -447,7 +450,14 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         Delta += p.Delta0
         Delta += gcache["Eg"]
         Delta += N_H_MPa_per_K * Q_over_R / Tk * (dT_map if fac == 1.0 else dT_map + (fac - 1.0) * dT_app)
-        ok = (Delta > 0) & ~occ & ~tried
+        D = p.D0 * np.exp(-p.QD / (8.314 * Tk)) * 1e12   # мкм²/с
+        rad_um = np.sqrt(2 * D * p.t_grow)
+        c_eq = c_line(T, L["TSSD"])
+        # водорода сверх TSSD в окрестности зародыша (та же, что в проверке ниже) должно хватать на пластинку
+        # L_min — иначе место не разыгрывается: отказ был бы заведомым, а темп всплеска — ложным
+        Rb = int(np.clip(2 * rad_um, 2.0, 60.0) / p.dx); nb = 2 * Rb + 1
+        h_ok = ndi.uniform_filter(c, size=nb, mode="wrap") * (nb * nb) - c_eq * (nb * nb) >= need_H * (1 - 1e-6)
+        ok = (Delta > 0) & ~occ & ~tried & ~noroom & h_ok
         # ln скорости по всем клеткам сразу, не-места — −∞ (без выборки по маске)
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             lnr = np.divide(p.Delta0, Delta)
@@ -459,14 +469,11 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         if ngb:
             Delta_gb = p.Delta0 + N_H_MPa_per_K * Tk * (lnc.ravel()[gcell] - np.log(c_line(T, L["TSSP"]))) \
                 + EPS_N * g_gb + N_H_MPa_per_K * Q_over_R / Tk * (dT_gb + (fac - 1.0) * dT_gb_app)
-            ok_gb = (Delta_gb > 0) & ~occ.ravel()[gcell] & ~tried_gb
+            ok_gb = (Delta_gb > 0) & ~occ.ravel()[gcell] & ~tried_gb & ~noroom_gb & h_ok.ravel()[gcell]
             lnr_gb = np.full(ngb, -np.inf)
             lnr_gb[ok_gb] = np.log(p.nu_c) + ln_gbcell - p.B * ((p.Delta0 / Delta_gb[ok_gb]) ** 2 - 1.0)
         else:
             ok_gb = np.zeros(0, bool); lnr_gb = np.zeros(0)
-        D = p.D0 * np.exp(-p.QD / (8.314 * Tk)) * 1e12   # мкм²/с
-        rad_um = np.sqrt(2 * D * p.t_grow)
-        c_eq = c_line(T, L["TSSD"])
         q = (p.rate2 if (p.rate2 > 0 and T <= p.T_rate2) else p.rate) / 60.0
         dt = p.dT_max / q
         lam_tot = 0.0
@@ -499,6 +506,12 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
                 else:
                     psi = gpsi_f[kgb]
                     cc, half = grow_gb(kgb, occ_b)
+                if 2 * half < p.L_min:                  # не помещается (зерно, грань, соседи) — больше не разыгрывать
+                    if kgb < 0:
+                        noroom[ci] = True
+                    else:
+                        noroom_gb[kgb] = True
+                    continue
                 # водорода сверх TSSD в окрестности радиусом ~ диффузионной длины роста хватает не на всё
                 R = int(np.clip(2 * rad_um, 2.0, 60.0) / p.dx)
                 yy = np.arange(ci[0] - R, ci[0] + R + 1) % ny; xx = np.arange(ci[1] - R, ci[1] + R + 1) % nx
