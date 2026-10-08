@@ -58,6 +58,10 @@ class KParams(Params):
     app_dT: float = 0.0             # °C/МПа: сдвиг температуры выпадения на 1 МПа нормального к пластинке
                                     # напряжения (Vizcaíno и др. 2014: 0.08 ± 0.02 в зёрнах с осью c вдоль нагрузки);
                                     # > 0 — заменяет упругий вклад нагрузки (g_app) этим измеренным
+    halo_cap: float = 0.0           # предел суммарной пластической деформации ореолов в клетке (эквивалентная, по
+                                    # Мизесу); 0 — без предела. Ореолы соседей складываются линейно, а пластическая
+                                    # зона скопления — не сумма зон: в рое из сотен пластинок сумма уходит за десятки %
+    halo_smax: float = 0.0          # ореолы — из таблицы при нагрузке не выше этой (МПа); 0 — без предела
     app_center: bool = False        # сдвиг от нагрузки ∝ (sin²ψ − ½): радиальным фора, окружным штраф, в среднем
                                     # выделение не ускоряется (Lacroix 2021: под 200 МПа TSSP не выше, K_N тот же)
     bias_dT: float = 0.0            # °C: фора выпадения в зёрнах с осью c по радиусу (∝ cos²ψ) — плотность
@@ -103,7 +107,8 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     if p.halo:
         from halo import HaloTable
         kw_h = dict(path=p.halo_tab) if p.halo_tab else {}
-        ht = HaloTable(**kw_h); ht.set_load(p.sigma_app)
+        hs = (lambda s_: min(s_, p.halo_smax) if p.halo_smax > 0 else s_)
+        ht = HaloTable(**kw_h); ht.set_load(hs(p.sigma_app))
         ht0 = HaloTable(**kw_h); ht0.set_load(0.0)            # нерастворившиеся пластинки прошлого цикла — без нагрузки
     halos = {}                                          # номер пластинки → (строки, столбцы, компоненты, полудлина)
     psi_map = gpsi[grains]
@@ -318,6 +323,8 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         при сжатии — как без нагрузки."""
         s_loc = float(sapp[int(c[0] / p.dx) % ny, 0])
         key = int(round(max(s_loc, 0.0) / 25.0) * 25)
+        if p.halo_smax > 0:
+            key = min(key, int(p.halo_smax))
         if key not in halo_tabs:
             from halo import HaloTable
             halo_tabs[key] = HaloTable(**(dict(path=p.halo_tab) if p.halo_tab else {}))
@@ -342,6 +349,9 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         return out
 
     Epend = [np.zeros((ny, nx)) for _ in range(4)]     # собственная деформация, ещё не учтённая в S
+    if p.halo_cap > 0:                                  # сумма ореолов как есть и учтённая (с пределом)
+        Hraw = [np.zeros((ny, nx)) for _ in range(4)]
+        Heff = [np.zeros((ny, nx)) for _ in range(4)]
     pend = [False]
     gcache = {}                                         # поле зарождения от S — до следующего решения
 
@@ -351,8 +361,19 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         solve=False — без решения упругой задачи: на шаг одно решение (solve_pending), задача линейная."""
         for ys, xs, comps, sgn in (extra or ()):
             sel = np.ix_(ys, xs)
-            for a, v in zip(Epend, comps):
-                a[sel] += sgn * v
+            if p.halo_cap > 0:                          # учтённое = сумма, сжатая до предела (e11, e22, e12, e33)
+                for a, v in zip(Hraw, comps):
+                    a[sel] += sgn * v
+                r = [a[sel] for a in Hraw]
+                eq = np.sqrt(2.0 / 3.0 * (r[0] ** 2 + r[1] ** 2 + r[3] ** 2 + 2.0 * r[2] ** 2))
+                k = np.minimum(1.0, p.halo_cap / np.maximum(eq, 1e-30))
+                for a, h, rr in zip(Epend, Heff, r):
+                    new = rr * k
+                    a[sel] += new - h[sel]
+                    h[sel] = new
+            else:
+                for a, v in zip(Epend, comps):
+                    a[sel] += sgn * v
         sink = np.zeros((ny, nx)) if deplete else None
         for c, psi, half in batch:
             ys, xs, fr, comps = plate_eigen((ny, nx), p.dx, c, psi, half, p.h_um)
@@ -437,7 +458,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         # напряжение газа в запаянной трубе спадает с абсолютной температурой
         fac = min(1.0, Tk / (p.sigma_T0 + 273.15)) if p.sigma_T0 > 0 else 1.0
         if p.halo and p.sigma_T0 > 0 and abs(fac - fac_halo) > 0.01:
-            ht.set_load(p.sigma_app * fac); fac_halo = fac
+            ht.set_load(hs(p.sigma_app * fac)); fac_halo = fac
         if not gcache:
             gcache["g"], gcache["g_gb"] = nuc_field()
             gcache["Eg"] = EPS_N * gcache["g"]
