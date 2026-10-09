@@ -150,6 +150,12 @@ def cases(mode):
     if mode == "rings0":   # участки 0° кольца с разбросом по зёрнам
         ds = float(os.environ.get("E635_DTS", "3.0"))
         return [dict(c, bias_dT=4.0, dT_s=ds) for c in cases("ring") if c["bias_dT"] == 5.0 and c["ring"] in ("S1_0", "S2_0")]
+    if mode == "m2s":      # трубы под давлением (рис. 6): пластичность, фора 4 °C, разброс по зёрнам, водород 150–400 ppm
+        ds = float(os.environ.get("E635_DTS", "3.0"))
+        return ([dict(H_ppm=210.0, rate=0.5, bias_dT=4.0, dT_s=ds, sigma_app=s, sigma_T0=400.0, seed=sd)
+                 for s in (0, 50, 70, 90, 110, 140) for sd in (1, 2)]
+                + [dict(H_ppm=h, rate=0.5, bias_dT=4.0, dT_s=ds, sigma_app=s, sigma_T0=400.0, seed=1)
+                   for h in (150.0, 300.0, 400.0) for s in (50, 90, 140)])
     if mode == "zry":      # для сравнения: фора холоднодеформированного Zircaloy-4 (17 °C) на Э635
         return [dict(H_ppm=210.0, rate=0.5, bias_dT=17.0, sigma_app=s, sigma_T0=400.0, seed=1)
                 for s in (0, 50, 90, 140)]
