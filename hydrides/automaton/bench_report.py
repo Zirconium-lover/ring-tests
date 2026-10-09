@@ -6,6 +6,7 @@ python bench_report.py knock папка папка_шума      — вклад 
 python bench_report.py lhs   папка [папка_шума]    — суррогат (гауссов процесс, шум — по повторам номинала) и индексы Соболя ST/S1
 python bench_report.py etch  папка                 — этап 1: утолщение травлением по площади до опыта, F_l до опыта
 python bench_report.py remeasure папка [...]       — пересъёмка мер по снимку из сохранённых полей (observe.ETCH_UM)
+python bench_report.py match папка папка_шума      — согласование с данными калибровки (history matching) и прогнозы на нём
 python bench_report.py calib папка [папка_шума]    — фора как функция остальных факторов, откалиброванные прогнозы и их полоса
 """
 import glob
@@ -291,6 +292,77 @@ def rep_calib(folder, level=LEVEL, s_target=45.0, n_mc=3000, noise_folder=None):
     json.dump(out, open(os.path.join(folder, "calib.json"), "w"), indent=1, ensure_ascii=False)
 
 
+def rep_match(folder, noise_folder, n=200000, cut=3.0, disc=0.03):
+    """Согласование с данными калибровки (history matching): все неопределённые факторы — в своих физических
+    пределах; область, где суррогат не противоречит данным калибровки (неправдоподобие < cut), и прогнозы
+    проверочных мер на ней. Данные калибровки: F_l до опыта 0.10–0.125 (табл. 1 Плясова) и порог колец 45 ± 9 МПа
+    (F_l = 0.25 по средней кривой). Неправдоподобие = |прогноз − опыт| / √(ошибка опыта² + ошибка суррогата² +
+    расхождение модели² (disc))."""
+    from bench import FACTORS
+    rows = load(folder, "lhs")
+    names = [f[0] for f in FACTORS]
+
+    def unit(r):
+        return [np.log(r[k] / lo) / np.log(hi / lo) if sc == "log" else (r[k] - lo) / (hi - lo) for k, lo, hi, sc in FACTORS]
+    X = np.array([unit(r) for r in rows])
+    s0 = sigmas(rows[0])
+    fits = {}
+    for stage in ["before"] + [f"s{v:g}" for v in s0]:
+        y = np.array([r[stage]["F_l"] for r in rows], float)
+        _, _, gp, nz = _gp_fit(X, y, noise_sd(noise_folder, stage, "F_l"))
+        ok = np.isfinite(y); mu, sd = y[ok].mean(), y[ok].std()
+        fits[stage] = (gp, nz, mu, sd)
+    for stage, key in ((f"s{s0[-2]:g}", "RHCF"), (f"s{s0[-2]:g}", "GB_frac")):
+        y = np.array([r[stage][key] for r in rows], float)
+        _, _, gp, nz = _gp_fit(X, y, noise_sd(noise_folder, stage, key))
+        ok = np.isfinite(y); fits[key] = (gp, nz, y[ok].mean(), y[ok].std())
+
+    def pred(key, Z):
+        gp, nz, mu, sd = fits[key]
+        m, s = gp.predict(Z, return_std=True)
+        return m * sd + mu, np.sqrt(np.clip(s ** 2 - nz, 0, None)) * sd     # среднее и ошибка суррогата (без шума затравок)
+    rng = np.random.default_rng(7)
+    Z = rng.random((n, len(names)))
+    Z[:, names.index("wang")] = np.round(Z[:, names.index("wang")])
+    I = np.zeros(n)
+    mb, sb = pred("before", Z)
+    I = np.maximum(I, np.abs(mb - 0.1125) / np.sqrt(0.0125 ** 2 + sb ** 2 + disc ** 2))
+    curve = {v: pred(f"s{v:g}", Z) for v in s0}
+    # порог по средней кривой: σ, где F_l проходит 0.25 (линейно по сетке σ), ошибка — из ошибок суррогата у перехода
+    F = np.stack([curve[v][0] for v in s0], 1); Fs = np.stack([curve[v][1] for v in s0], 1)
+    sg = np.array(s0)
+    st = np.full(n, np.nan); st_err = np.full(n, np.nan)
+    above0 = F[:, 0] >= LEVEL
+    st[above0] = 0.0
+    for j in range(len(sg) - 1):
+        m = np.isnan(st) & (F[:, j] < LEVEL) & (F[:, j + 1] >= LEVEL)
+        slope = (F[m, j + 1] - F[m, j]) / (sg[j + 1] - sg[j])
+        st[m] = sg[j] + (LEVEL - F[m, j]) / slope
+        st_err[m] = np.sqrt(Fs[m, j] ** 2 + disc ** 2) / slope
+    st_err[above0] = np.sqrt(Fs[above0, 0] ** 2 + disc ** 2) / np.maximum((F[above0, 1] - F[above0, 0]) / (sg[1] - sg[0]), 1e-3)
+    st[np.isnan(st)] = 300.0; st_err[np.isnan(st_err)] = 50.0
+    I = np.maximum(I, np.abs(st - 45.0) / np.sqrt(9.0 ** 2 + st_err ** 2))
+    keep = I < cut
+    print(f"согласовано с данными калибровки (неправдоподобие < {cut:g}): {keep.mean() * 100:.1f} % пространства факторов "
+          f"({keep.sum()} из {n})")
+    if keep.sum() < 50:
+        return
+    print("где лежат согласованные наборы (медиана и 5–95 % в долях диапазона → в единицах):")
+    for i, (k, lo, hi, sc) in enumerate(FACTORS):
+        q = np.percentile(Z[keep, i], [5, 50, 95])
+        conv = (lambda u: lo * (hi / lo) ** u) if sc == "log" else (lambda u: lo + (hi - lo) * u)
+        narrowed = (q[2] - q[0]) < 0.75
+        print(f"  {k:10s} {conv(q[1]):8.3g} ({conv(q[0]):.3g}–{conv(q[2]):.3g}){'  ← сужен' if narrowed else ''}")
+    print("прогнозы на согласованной области (медиана, 5–95 %):")
+    out = {}
+    for key in ["before"] + [f"s{v:g}" for v in s0] + ["RHCF", "GB_frac"]:
+        m, _ = pred(key, Z[keep])
+        out[key] = [float(np.median(m)), float(np.percentile(m, 5)), float(np.percentile(m, 95))]
+        print(f"  {key:8s} {out[key][0]:.2f} ({out[key][1]:.2f}–{out[key][2]:.2f})")
+    print(f"  порог σ* {np.median(st[keep]):.0f} ({np.percentile(st[keep], 5):.0f}–{np.percentile(st[keep], 95):.0f}) МПа")
+    json.dump(dict(frac=float(keep.mean()), pred=out), open(os.path.join(folder, "match.json"), "w"), indent=1)
+
+
 def rep_etch(folder, target=0.115, grid=(0.0, 1.0, 2.0, 3.0, 4.0, 5.0)):
     """Этап 1: утолщение травлением по доле площади до опыта (снимки колец до опыта: 11–12 %), затем F_l до опыта
     тем же оператором (опыт: 0.097–0.125) — проверка без новой подгонки."""
@@ -324,6 +396,8 @@ if __name__ == "__main__":
         rep_etch(sys.argv[2])
     elif mode == "calib":
         rep_calib(sys.argv[2], noise_folder=sys.argv[3] if len(sys.argv) > 3 else None)
+    elif mode == "match":
+        rep_match(sys.argv[2], sys.argv[3])
     elif mode == "remeasure":
         for d in sys.argv[2:]:
             remeasure(d)
