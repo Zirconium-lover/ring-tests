@@ -143,6 +143,12 @@ def cases(mode):
         return [(f"kappa{k:g}_dts{d:g}_seed{s}", dict(seed=s, kappa=float(k), dT_s=float(d), size_um=(240.0, 240.0),
                                                      sigmas=(0.0, 60.0, 100.0, 150.0)))
                 for k in (KAPPAS or (2.7, 5.4)) for d in (3.0,) for s in (1, 2)]
+    if mode == "tubevis":  # оценочно самый реалистичный вариант (κ 2, разброс 2 °C, переход 30°) — трубы 230 ppm, вся стенка,
+        # для наглядного сравнения со снимками труб при 0 / 70 / 140 МПа
+        est = dict(kappa=2.0, dT_s=2.0, cross_tol=30.0, bias_dT=6.0, L_max=8.0, mem_keep=0.7, H_ppm=230.0, rate=0.5,
+                   sz_ratio=0.5, sigma_T0=400.0, size_um=(860.0, 360.0), walls_um=5.0, chi0_profile=(38.3, 38.7, 32.8),
+                   seed=int(os.environ.get("VIS_SEED", "1")))
+        return [("tubevis_a", dict(est, sigmas=(0.0, 70.0))), ("tubevis_b", dict(est, sigmas=(140.0,)))]
     if mode == "lhs2":
         n = int(os.environ.get("LHS_N", "100"))
         U = lhs(n, len(FACTORS2), np.random.default_rng(2027))
