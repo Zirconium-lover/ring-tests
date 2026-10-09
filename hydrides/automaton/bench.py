@@ -129,6 +129,10 @@ def cases(mode):
         return [(f"tube_H{h:g}_seed{s}", dict(seed=s, H_ppm=float(h), rate=0.5, sz_ratio=0.5, sigma_T0=400.0,
                                               sigmas=(0.0, 50.0, 70.0, 90.0, 110.0, 140.0)))
                 for h in (160, 300, 450) for s in (3, 4)]
+    if mode == "kappa":    # Р5: связь внутренних полей с зарождением та же, что у нагрузки (κ = 0.386/0.072 ≈ 5.4)?
+        return [(f"kappa{k:g}_dts{d:g}_seed{s}", dict(seed=s, kappa=float(k), dT_s=float(d), size_um=(240.0, 240.0),
+                                                     sigmas=(0.0, 60.0, 100.0, 150.0)))
+                for k in (2.7, 5.4) for d in (3.0,) for s in (1, 2)]
     if mode == "lhs":
         n = int(os.environ.get("LHS_N", "200"))
         U = lhs(n, len(FACTORS), np.random.default_rng(2026))
