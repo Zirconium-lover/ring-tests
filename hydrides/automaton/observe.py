@@ -14,7 +14,8 @@ from scipy import ndimage as ndi
 import rhc_model as RM
 from connectivity import rhc_mask
 
-ETCH_UM = 3.0          # утолщение травлением, мкм: по доле площади до опыта (11–12 %), этап 1 уточняет
+ETCH_UM = 2.2          # утолщение травлением, мкм: этап 1 — доля площади структуры до опыта 11.5 % (снимки колец 11–12 %),
+                       # полная модель, 16 полей (bench_report.py etch); прежнее 3.0 — по старой модели
 
 
 def fl_objects(mask, um, L_min=5.0, n_prof=12):
