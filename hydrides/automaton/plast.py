@@ -15,6 +15,7 @@
 import numpy as np
 import scipy.fft as sfft
 from scipy import ndimage as ndi
+import fastk as FK
 
 
 class Plasticity:
@@ -61,11 +62,18 @@ class Plasticity:
         return self._kf[key]
 
     def _conv(self, dd, wy, wx):
-        """Изменение напряжений в окне от изменения ε_p в нём же (точная свёртка с функцией влияния)."""
+        """Изменение напряжений в окне от изменения ε_p в нём же (точная свёртка с функцией влияния). Преобразования
+        пакетом, сумма по j в том же порядке, что sum(...) — побитно то же."""
         KF = self._kfft(wy, wx)
         Py, Px = 2 * wy, 2 * wx
-        F = [sfft.rfft2(d, s=(Py, Px)) for d in dd]
-        return [sfft.irfft2(sum(F[j] * KF[j][i] for j in range(4)), s=(Py, Px))[:wy, :wx] for i in range(4)]
+        F = sfft.rfft2(np.stack(dd), s=(Py, Px), axes=(-2, -1))
+        acc = np.empty((4,) + F.shape[1:], F.dtype)
+        for i in range(4):                              # numpy, не numba: комплексное умножение numpy (fma) иначе
+            a = acc[i]                                  # не повторить побитно
+            np.multiply(F[0], KF[0][i], out=a)
+            for j in range(1, 4):
+                a += F[j] * KF[j][i]
+        return list(sfft.irfft2(acc, s=(Py, Px), axes=(-2, -1))[:, :wy, :wx])
 
     @staticmethod
     def _eq(d11, d22, d33, d12):
@@ -100,7 +108,11 @@ class Plasticity:
         applied = [np.zeros_like(self.p) for _ in range(4)]   # Δε_p, уже учтённое в S
         n_it = 0
         for _ in range(outer):
-            over = self._over(S, sxx, Y, dp, mtx, szz)
+            if FK.over_arr is not None:
+                over = np.empty_like(Y)
+                FK.over_arr(S[0], S[1], S[2], S[3], sxx, szz, Y, self.hard, dp, mtx, over)
+            else:
+                over = self._over(S, sxx, Y, dp, mtx, szz)
             act = over > tol
             if not act.any():
                 break
@@ -118,14 +130,20 @@ class Plasticity:
                 mw, Yw, sw, zw = mtx[sl], Y[sl], sxx[sl], szz[sl]
                 cc = c
                 for it in range(maxit):
-                    ow = float(np.max(self._over(Sw, sw, Yw, dpw, mw, zw)))
+                    ow = (float(FK.over_max(Sw[0], Sw[1], Sw[2], Sw[3], sw, zw, Yw, self.hard, dpw, mw))
+                          if FK.over_max is not None else float(np.max(self._over(Sw, sw, Yw, dpw, mw, zw))))
                     if ow < tol:
                         break
                     if not np.isfinite(ow) or ow > 1e4:                # разошлось — заново, осторожно
                         Sw = [a[sl].copy() for a in S]; dEw = [a[sl].copy() for a in dE]; dpw = dp[sl].copy()
                         cc = 1.0
                         continue
-                    new, ndp = self._step(Sw, sw, dEw, Yw, mw, 2 * mu * cc, zw)
+                    if FK.step is not None:
+                        new = [np.empty_like(Yw) for _ in range(4)]; ndp = np.empty_like(Yw)
+                        FK.step(Sw[0], Sw[1], Sw[2], Sw[3], sw, zw, dEw[0], dEw[1], dEw[2], dEw[3], Yw, mw,
+                                2 * mu * cc, self.hard, new[0], new[1], new[2], new[3], ndp)
+                    else:
+                        new, ndp = self._step(Sw, sw, dEw, Yw, mw, 2 * mu * cc, zw)
                     dd = [n - d for n, d in zip(new, dEw)]
                     dS = self._conv([np.pad(d, ((0, wy8 - wy), (0, wx8 - wx))) for d in dd], wy8, wx8)
                     for a, b in zip(Sw, dS):

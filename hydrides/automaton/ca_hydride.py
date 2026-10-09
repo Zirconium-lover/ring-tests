@@ -32,6 +32,7 @@ import numpy as np
 import scipy.fft as sfft
 from scipy import ndimage as ndi
 from scipy.spatial import cKDTree
+import fastk as FK
 
 EPS_N, EPS_T = 0.0720, 0.0458        # несоответствие δ-гидрида: по нормали, в плоскости (Carpenter 1973)
 
@@ -146,27 +147,33 @@ class Elastic:
     def stress(self, e11, e22, e12, e33):
         lam, mu = self.lam, self.mu
         tr = e11 + e22 + e33
-        s11 = sfft.rfft2(lam * tr + 2 * mu * e11)
-        s22 = sfft.rfft2(lam * tr + 2 * mu * e22)
-        s12 = sfft.rfft2(2 * mu * e12)
+        # три прямых преобразования одним вызовом (побитно то же, что по одному)
+        s = sfft.rfft2(np.stack([lam * tr + 2 * mu * e11, lam * tr + 2 * mu * e22, 2 * mu * e12]), axes=(-2, -1))
         kx, ky = self.kx, self.ky
-        t1 = kx * s11 + ky * s12
-        t2 = kx * s12 + ky * s22
         c0, a = self.Ki
-        kt = (kx * t1 + ky * t2)
-        u1 = c0 * (t1 - a * kx * kt)            # (K⁻¹ τ), множитель −i учтён ниже
-        u2 = c0 * (t2 - a * ky * kt)
-        eps11 = kx * u1
-        eps22 = ky * u2
-        eps12 = 0.5 * (kx * u2 + ky * u1)
-        for arr in (eps11, eps22, eps12):
-            arr[0, 0] = 0.0
-        E11 = np.fft.irfft2(eps11, s=self.shape)
-        E22 = np.fft.irfft2(eps22, s=self.shape)
-        E12 = np.fft.irfft2(eps12, s=self.shape)
+        if FK.elastic_spec is not None:                  # слитое ядро (fastk.py): тот же порядок действий
+            eps = np.empty_like(s)
+            FK.elastic_spec(s[0], s[1], s[2], kx, ky, c0, a, eps[0], eps[1], eps[2])
+        else:
+            s11, s22, s12 = s
+            t1 = kx * s11 + ky * s12
+            t2 = kx * s12 + ky * s22
+            kt = (kx * t1 + ky * t2)
+            u1 = c0 * (t1 - a * kx * kt)            # (K⁻¹ τ), множитель −i учтён ниже
+            u2 = c0 * (t2 - a * ky * kt)
+            eps = np.stack([kx * u1, ky * u2, 0.5 * (kx * u2 + ky * u1)])
+            eps[:, 0, 0] = 0.0
+        E = np.fft.irfft2(eps, s=self.shape, axes=(-2, -1))   # три обратных одним вызовом (побитно то же)
+        E11, E22, E12 = E[0], E[1], E[2]
         # средняя деформация в плоскости = средней собственной (свободное макрорасширение); σ̄ = 0 при free_z
-        E11 += e11.mean(); E22 += e22.mean(); E12 += e12.mean()
+        m11, m22, m12 = e11.mean(), e22.mean(), e12.mean()
         E33 = float(np.mean(e33)) if self.free_z else 0.0          # иначе ε_zz = 0 (плоская деформация)
+        if FK.elastic_real is not None and np.ndim(e33) == 2:
+            S11 = np.empty_like(E11); S22 = np.empty_like(E11); S12 = np.empty_like(E11); S33 = np.empty_like(E11)
+            FK.elastic_real(E11, E22, E12, e11, e22, e12, e33, tr, float(m11), float(m22), float(m12), float(E33),
+                            float(lam), float(2 * mu), S11, S22, S12, S33)
+            return S11, S22, S12, S33
+        E11 += m11; E22 += m22; E12 += m12
         ekk = E11 + E22 + E33 - tr
         S11 = lam * ekk + 2 * mu * (E11 - e11)
         S22 = lam * ekk + 2 * mu * (E22 - e22)
