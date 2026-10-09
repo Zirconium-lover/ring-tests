@@ -5,6 +5,7 @@ python bench_report.py noise папка                 — шум мер (ср�
 python bench_report.py knock папка папка_шума      — вклад механизма при всех прочих: выключенный − номинал (те же затравки)
 python bench_report.py lhs   папка                 — суррогат (гауссов процесс) и индексы Соболя S1, ST по каждой мере
 python bench_report.py etch  папка                 — этап 1: утолщение травлением по площади до опыта, F_l до опыта
+python bench_report.py remeasure папка [...]       — пересъёмка мер по снимку из сохранённых полей (observe.ETCH_UM)
 """
 import glob
 import json
@@ -21,10 +22,46 @@ OBS = ("F_l", "F_l0", "RHCP", "RHCF", "RHCP_05", "RHCF_05", "GB_frac", "n_plates
 
 
 def load(folder, prefix=""):
+    """Строки расчётов; меры по снимку — из пересъёмки (remeasured.json), если она есть."""
+    rm_fn = os.path.join(folder, "remeasured.json")
+    rm = json.load(open(rm_fn)) if os.path.exists(rm_fn) else {}
     rows = []
     for f in sorted(glob.glob(os.path.join(folder, prefix + "*.json"))):
-        rows.append(json.load(open(f)))
+        if os.path.basename(f) in ("remeasured.json", "sobol.json"):
+            continue
+        r = json.load(open(f))
+        for stage, v in rm.get(r.get("tag"), {}).items():
+            if stage in r:
+                r[stage].update(v)
+        rows.append(r)
     return rows
+
+
+def remeasure(folder, etch_um=None, procs=4):
+    """Пересъёмка мер по снимку всех сохранённых полей папки одним оператором (observe.ETCH_UM)."""
+    from multiprocessing import Pool
+    import observe as OB
+    e = OB.ETCH_UM if etch_um is None else etch_um
+    fn = os.path.join(folder, "remeasured.json")
+    done = json.load(open(fn)) if os.path.exists(fn) else {}
+    todo = [f for f in sorted(glob.glob(os.path.join(folder, "*.npz")))
+            if os.path.basename(f)[:-4] not in done and os.path.exists(f[:-4] + ".json")]
+    with Pool(procs) as pool:
+        for tag, v in pool.imap_unordered(_remeasure_one, [(f, e) for f in todo]):
+            done[tag] = v
+            json.dump(done, open(fn, "w"), default=float)
+    print(f"пересъёмка {folder}: {len(todo)} полей, утолщение {e} мкм")
+
+
+def _remeasure_one(a):
+    f, e = a
+    import observe as OB
+    meta = json.load(open(f[:-4] + ".json"))
+    z = np.load(f)
+    nw = int(round(float(meta.get("walls_um", 0.0)) / float(z["dx"])))
+    v = {k: OB.observe_image(z[k], float(z["dx"]), nw, e) for k in z.files if k != "dx"}
+    v["etch_um"] = e
+    return meta["tag"], v
 
 
 def sigmas(r):
@@ -201,3 +238,6 @@ if __name__ == "__main__":
         rep_lhs(sys.argv[2])
     elif mode == "etch":
         rep_etch(sys.argv[2])
+    elif mode == "remeasure":
+        for d in sys.argv[2:]:
+            remeasure(d)

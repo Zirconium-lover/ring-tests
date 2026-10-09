@@ -47,9 +47,22 @@ def fl_objects(mask, um, L_min=5.0, n_prof=12):
 
 
 def observe(res, etch_um=ETCH_UM, um_rhc=3.5, L_min=5.0, spec=True):
-    p = res["params"]; dx = p.dx
-    nw = int(res.get("walls", 0))
-    hyd = np.asarray(res["hyd"], float)
+    out = observe_image(res["hyd"], res["params"].dx, int(res.get("walls", 0)), etch_um, um_rhc, L_min, spec)
+    new = [q for q in res["plates"] if not q.get("init")]
+    L = np.array([2 * q["half"] for q in new])
+    gbk = np.array([q.get("kind") == "gb" for q in new], bool)
+    radp = np.array([abs(np.sin(q["psi"])) >= np.sin(np.radians(45)) for q in new], bool)
+    out.update(n_plates=len(new), L_plate_mean=float(L.mean()) if len(L) else np.nan,
+               GB_frac=float(L[gbk].sum() / L.sum()) if len(L) else np.nan,
+               F_plates=float(L[radp].sum() / L.sum()) if len(L) else np.nan,
+               T_first=float(new[0]["T"]) if new else np.nan,
+               p_plast_mean=float(np.mean(res["p_plast"])) if "p_plast" in res else np.nan)
+    return out
+
+
+def observe_image(hyd, dx, nw=0, etch_um=ETCH_UM, um_rhc=3.5, L_min=5.0, spec=True):
+    """Меры по снимку (всё, что зависит от оператора съёмки) — и для пересъёмки сохранённых полей."""
+    hyd = np.asarray(hyd, float)
     if nw:
         hyd = hyd[nw: hyd.shape[0] - nw]
     m = RM.optical(hyd, dx, etch_um)
@@ -63,13 +76,4 @@ def observe(res, etch_um=ETCH_UM, um_rhc=3.5, L_min=5.0, spec=True):
     if spec:
         s = RM.rhc_spec(hyd, dx, etch_um, um_rhc)
         out.update(RHCP=s["RHCP"], RHCF=s["RHCF"], RHCP_rad=s["RHCP_rad"], RHCF_rad=s["RHCF_rad"])
-    new = [q for q in res["plates"] if not q.get("init")]
-    L = np.array([2 * q["half"] for q in new])
-    gbk = np.array([q.get("kind") == "gb" for q in new], bool)
-    radp = np.array([abs(np.sin(q["psi"])) >= np.sin(np.radians(45)) for q in new], bool)
-    out.update(n_plates=len(new), L_plate_mean=float(L.mean()) if len(L) else np.nan,
-               GB_frac=float(L[gbk].sum() / L.sum()) if len(L) else np.nan,
-               F_plates=float(L[radp].sum() / L.sum()) if len(L) else np.nan,
-               T_first=float(new[0]["T"]) if new else np.nan,
-               p_plast_mean=float(np.mean(res["p_plast"])) if "p_plast" in res else np.nan)
     return out
