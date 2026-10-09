@@ -11,7 +11,8 @@ python bench.py папка режим [процессов]
   lhs    — глобальный план (латинский гиперкуб) по неопределённым параметрам: полные индексы Соболя по суррогату
   grad   — С2: полоса 430 × 120 мкм с поверхностями, профиль +80 → −20 МПа (участки 0° колец)
   hyd    — С4: водород 160 / 300 / 450 ppm при 60 и 120 МПа
-  tube   — трубы под давлением: двухосно (σz = σθ/2), σ ∝ T, 0.5 °C/мин
+  tube   — трубы под давлением: двухосно (σz = σθ/2), σ ∝ T, 0.5 °C/мин (tube4 — ещё 2 затравки)
+  ring   — проверка вслепую: кольца Плясова целиком (850 мкм + поверхности), участки S1/S2 0° и 90° от одной исходной структуры
 Номинальная фора — E635_BIAS (после режима bias).
 """
 import json
@@ -63,7 +64,8 @@ def point(a):
         return
     t0 = time.time()
     base = dict(NOM)
-    base.update({k: v for k, v in kw.items() if k in NOM or k in ("seed", "sz_ratio", "walls_um", "v_h_over_rt", "sigma_T0")})
+    base.update({k: v for k, v in kw.items() if k in NOM or k in ("seed", "sz_ratio", "walls_um", "v_h_over_rt", "sigma_T0",
+                                                                  "chi0_profile")})
     if "grain" in kw:
         base["grain_um"] = (kw["grain"], kw["grain"])
     if kw.get("wang", 0) >= 0.5:
@@ -114,6 +116,19 @@ def cases(mode):
         return [(f"tube_H{h:g}_seed{s}", dict(seed=s, H_ppm=float(h), rate=0.5, sz_ratio=0.5, sigma_T0=400.0,
                                               sigmas=(0.0, 50.0, 70.0, 90.0, 110.0, 140.0)))
                 for h in (160, 300, 450) for s in range(1, 3)]
+    if mode == "ring":     # проверка вслепую: кольца Плясова целиком (стенка 850 мкм + поверхности), профили σ рис. 8–9;
+        # исходная структура одна на водород и затравку, нагрузки участков — от неё
+        from e635_plyasov import cases as ecases
+        prof = {c["ring"]: c["sigma_prof"] for c in ecases("ring") if c["bias_dT"] == 5.0}
+        Hs = {"S1": 152.0, "S2": 168.0}
+        return [(f"ring{ser}_seed{s}", dict(seed=s, H_ppm=Hs[ser], size_um=(860.0, 240.0), walls_um=5.0,
+                                           chi0_profile=(38.3, 38.7, 32.8),
+                                           loads=[(site, dict(sigma_prof=prof[site])) for site in prof if site.startswith(ser)]))
+                for ser in ("S1", "S2") for s in (1, 2)]
+    if mode == "tube4":    # трубы под давлением: ещё затравки (3, 4) к режиму tube
+        return [(f"tube_H{h:g}_seed{s}", dict(seed=s, H_ppm=float(h), rate=0.5, sz_ratio=0.5, sigma_T0=400.0,
+                                              sigmas=(0.0, 50.0, 70.0, 90.0, 110.0, 140.0)))
+                for h in (160, 300, 450) for s in (3, 4)]
     if mode == "lhs":
         n = int(os.environ.get("LHS_N", "200"))
         U = lhs(n, len(FACTORS), np.random.default_rng(2026))
