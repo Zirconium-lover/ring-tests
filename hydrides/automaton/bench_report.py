@@ -168,7 +168,9 @@ def rep_lhs(folder, noise_folder=None):
     X = np.array([unit(r) for r in rows])
     s0 = sigmas(rows[0])
     sm = f"s{s0[-2]:g}"
-    targets = [("before", "F_l")] + [(f"s{v:g}", "F_l") for v in s0] + [(sm, k) for k in ("RHCF", "RHCP", "GB_frac", "L_plate_mean", "n_plates")]
+    targets = ([("before", "F_l")] + [(f"s{v:g}", "F_l") for v in s0]
+               + [("before", "F_plates")] + [(f"s{v:g}", "F_plates") for v in s0]       # доля длины радиальных пластинок
+               + [(sm, k) for k in ("RHCF", "RHCP", "GB_frac", "L_plate_mean", "n_plates")])
     problem = dict(num_vars=len(names), names=names, bounds=[[0, 1]] * len(names))
     Xs = saltelli.sample(problem, 2048, calc_second_order=False)
     Xs[:, names.index("wang")] = np.round(Xs[:, names.index("wang")])      # правило — да/нет, не промежуточное
