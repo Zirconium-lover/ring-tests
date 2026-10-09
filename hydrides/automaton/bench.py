@@ -40,6 +40,7 @@ NOM = dict(lines="E635", T_max=400.0, T_end=100.0, H_ppm=160.0, rate=0.75, size_
            free_z=True, sigma_cap=1e9, kappa=1.0, plast=True, plast_sy=200.0, plast_h=200.0,
            stress_diff=True, sh_cap=1e4, gorsky="cons")
 SIG = (0.0, 30.0, 60.0, 100.0, 150.0)
+KAPPAS = tuple(float(v) for v in os.environ.get("KAPPAS", "").split(",") if v)
 
 # неопределённые параметры: (имя, низ, верх, шкала); mem_keep — доля ε_p, пережившая выдержку (возврат)
 FACTORS = [("bias_dT", 0.0, 10.0, "lin"), ("app_dT", 0.06, 0.10, "lin"), ("Delta0", 250.0, 800.0, "log"),
@@ -132,7 +133,7 @@ def cases(mode):
     if mode == "kappa":    # Р5: связь внутренних полей с зарождением та же, что у нагрузки (κ = 0.386/0.072 ≈ 5.4)?
         return [(f"kappa{k:g}_dts{d:g}_seed{s}", dict(seed=s, kappa=float(k), dT_s=float(d), size_um=(240.0, 240.0),
                                                      sigmas=(0.0, 60.0, 100.0, 150.0)))
-                for k in (2.7, 5.4) for d in (3.0,) for s in (1, 2)]
+                for k in (KAPPAS or (2.7, 5.4)) for d in (3.0,) for s in (1, 2)]
     if mode == "lhs":
         n = int(os.environ.get("LHS_N", "200"))
         U = lhs(n, len(FACTORS), np.random.default_rng(2026))
