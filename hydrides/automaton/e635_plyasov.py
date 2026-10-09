@@ -143,6 +143,13 @@ def cases(mode):
     if mode == "ringp":    # кольцо с коллективной пластичностью (E635_PLAST=1), форы из E635_BIAS="4,5"
         bs = [float(v) for v in os.environ.get("E635_BIAS", "4").split(",")]
         return [dict(c, bias_dT=b) for b in bs for c in cases("ring") if c["bias_dT"] == 5.0]
+    if mode == "m1s":      # однородное напряжение с разбросом по зёрнам dT_s (E635_DTS, °C; fe/grain_scatter.py)
+        ds = float(os.environ.get("E635_DTS", "3.0"))
+        return [dict(H_ppm=160.0, rate=0.75, bias_dT=4.0, dT_s=ds, sigma_app=s, seed=sd)
+                for s in (0, 30, 45, 60, 90) for sd in (1, 2)]
+    if mode == "rings0":   # участки 0° кольца с разбросом по зёрнам
+        ds = float(os.environ.get("E635_DTS", "3.0"))
+        return [dict(c, bias_dT=4.0, dT_s=ds) for c in cases("ring") if c["bias_dT"] == 5.0 and c["ring"] in ("S1_0", "S2_0")]
     if mode == "zry":      # для сравнения: фора холоднодеформированного Zircaloy-4 (17 °C) на Э635
         return [dict(H_ppm=210.0, rate=0.5, bias_dT=17.0, sigma_app=s, sigma_T0=400.0, seed=1)
                 for s in (0, 50, 90, 140)]
