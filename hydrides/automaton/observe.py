@@ -2,7 +2,9 @@
 
 Снимок: поле гидрида → 0.5 мкм/пикс, размытие 1 мкм, порог, утолщение травлением etch_um (rhc_model.optical).
 Меры:
-  F_l — доля длины связных объектов длиннее L_min, главная ось которых ближе 45° к радиусу (Плясов, SIAMS),
+  Fn_lab — оператором лаборатории МИФИ (скелет снимка, отрезки между ветвлениями, доля длины отрезков ближе 45°
+        к радиусу; ВКР МИФИ 2023, разд. 2.2) — им получены Fn труб, они же точки рис. 6 Плясова; гистограмма по углу;
+  F_l — доля длины связных объектов длиннее L_min, главная ось которых ближе 45° к радиусу (прежняя мера),
         по всему полю, по третям толщины и профилем (12 слоёв);
   RHCP, RHCF — по той же маске (connectivity.rhc_mask) и через конвейер снимков с пикселем um_rhc (как рис. 3–4);
   площадь, число пластинок, средняя длина, доля межзёренных.
@@ -46,6 +48,38 @@ def fl_objects(mask, um, L_min=5.0, n_prof=12):
     return out
 
 
+def fn_skeleton(mask, um, um_px=1.0, min_px=2, bins=18):
+    """Fn как в программе лаборатории (ВКР МИФИ 2023 по этим трубам, разд. 2.2): бинарный снимок → скелет (Чжан–Суэн) →
+    разбиение в точках ветвления → каждый отрезок — прямая (главная ось) → Fn = доля длины отрезков, отклонённых от
+    окружного направления больше чем на 45°. Строки маски — радиус, столбцы — окружность (снимок модели уже в
+    полярных осях трубы). um_px — пиксель снимка лаборатории (×100, ~1 мкм). → (Fn, гистограмма длины по углу
+    к окружному направлению 0–90°, число отрезков)."""
+    from skimage.morphology import skeletonize
+    k = um_px / um
+    m = ndi.zoom(mask.astype(float), 1.0 / k, order=1) > 0.5 if k != 1 else mask.astype(bool)
+    sk = skeletonize(m)
+    nb = ndi.convolve(sk.astype(int), np.ones((3, 3), int), mode="constant") - 1
+    branch = sk & (nb >= 3)
+    seg = sk & ~ndi.binary_dilation(branch, structure=np.ones((3, 3)))
+    lab, n = ndi.label(seg, structure=np.ones((3, 3)))
+    hist = np.zeros(bins); Lr = Lt = 0.0; nseg = 0
+    for k_, sl in enumerate(ndi.find_objects(lab), start=1):
+        if sl is None:
+            continue
+        ys, xs = np.nonzero(lab[sl] == k_)
+        if len(ys) < min_px:
+            continue
+        P = np.stack([ys, xs], 1).astype(float); P -= P.mean(0)
+        _, v = np.linalg.eigh(P.T @ P)
+        ax = v[:, -1]
+        pr = P @ ax
+        L = (pr.max() - pr.min() + 1.0) * um_px
+        ang = np.degrees(np.arctan2(abs(ax[0]), abs(ax[1])))      # от окружного (столбцы) направления, 0–90°
+        hist[min(int(ang / (90.0 / bins)), bins - 1)] += L
+        Lt += L; Lr += L * (ang > 45.0); nseg += 1
+    return (Lr / Lt if Lt > 0 else np.nan), (hist / max(Lt, 1e-12)).tolist(), nseg
+
+
 def observe(res, etch_um=ETCH_UM, um_rhc=3.5, L_min=5.0, spec=True):
     out = observe_image(res["hyd"], res["params"].dx, int(res.get("walls", 0)), etch_um, um_rhc, L_min, spec)
     new = [q for q in res["plates"] if not q.get("init")]
@@ -69,6 +103,11 @@ def observe_image(hyd, dx, nw=0, etch_um=ETCH_UM, um_rhc=3.5, L_min=5.0, spec=Tr
     out = dict(area=float(m.mean()))
     out.update(fl_objects(m, RM.UM, L_min))
     m0 = RM.optical(hyd, dx, 0.0)
+    # Fn оператором лаборатории (скелет, отрезки между ветвлениями): без утолщения — основной (структура до опыта
+    # 0.10–0.13 при опыте 0.09–0.12), с утолщением 1 мкм и ETCH_UM — для полосы неопределённости оператора
+    fn, fh, ns = fn_skeleton(m0, RM.UM)
+    out.update(Fn_lab=fn, Fn_hist=fh, n_seg=ns, Fn_lab_e1=fn_skeleton(RM.optical(hyd, dx, 1.0), RM.UM)[0],
+               Fn_lab_e=fn_skeleton(m, RM.UM)[0])
     f0 = fl_objects(m0, RM.UM, L_min)
     out.update(F_l0=f0["F_l"], F_l0_out=f0["F_l_out"], F_l0_mid=f0["F_l_mid"], F_l0_in=f0["F_l_in"])
     r = rhc_mask(m, RM.UM, periodic=not nw)

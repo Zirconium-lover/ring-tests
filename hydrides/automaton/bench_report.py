@@ -39,13 +39,13 @@ def load(folder, prefix=""):
     return rows
 
 
-def remeasure(folder, etch_um=None, procs=4):
-    """Пересъёмка мер по снимку всех сохранённых полей папки одним оператором (observe.ETCH_UM)."""
+def remeasure(folder, etch_um=None, procs=4, force=False):
+    """Пересъёмка мер по снимку всех сохранённых полей папки одним оператором (observe.ETCH_UM); force — заново все."""
     from multiprocessing import Pool
     import observe as OB
     e = OB.ETCH_UM if etch_um is None else etch_um
     fn = os.path.join(folder, "remeasured.json")
-    done = json.load(open(fn)) if os.path.exists(fn) else {}
+    done = json.load(open(fn)) if (os.path.exists(fn) and not force) else {}
     todo = [f for f in sorted(glob.glob(os.path.join(folder, "*.npz")))
             if os.path.basename(f)[:-4] not in done and os.path.exists(f[:-4] + ".json")]
     with Pool(procs) as pool:
