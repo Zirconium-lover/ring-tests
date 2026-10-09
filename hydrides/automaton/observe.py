@@ -7,6 +7,7 @@
   F_l — доля длины связных объектов длиннее L_min, главная ось которых ближе 45° к радиусу (прежняя мера),
         по всему полю, по третям толщины и профилем (12 слоёв);
   RHCP, RHCF — по той же маске (connectivity.rhc_mask) и через конвейер снимков с пикселем um_rhc (как рис. 3–4);
+  M_* — морфология (morph.py): длина макрогидрида и отрезка скелета, плотность длины, шаг по радиусу;
   площадь, число пластинок, средняя длина, доля межзёренных.
 Поверхности стенки (walls) отрезаются. F_l0 — прежняя мера (без травления) для сравнения.
 """
@@ -115,4 +116,6 @@ def observe_image(hyd, dx, nw=0, etch_um=ETCH_UM, um_rhc=3.5, L_min=5.0, spec=Tr
     if spec:
         s = RM.rhc_spec(hyd, dx, etch_um, um_rhc)
         out.update(RHCP=s["RHCP"], RHCF=s["RHCF"], RHCP_rad=s["RHCP_rad"], RHCF_rad=s["RHCF_rad"])
+        from morph import morph_model                  # морфология как на снимке 3.5 мкм/пикс (calib_plan.md, п. 8)
+        out.update({"M_" + k: v for k, v in morph_model(hyd, dx, etch_um, um_rhc).items()})
     return out

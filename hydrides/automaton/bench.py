@@ -9,6 +9,7 @@ python bench.py папка режим [процессов]
   noise  — шум: номинальная точка, 8 затравок, поле 160 и 240 мкм
   knock  — выключение по одному из полной модели (диагностика вклада при всех прочих), 6 затравок
   lhs    — глобальный план (латинский гиперкуб) по неопределённым параметрам: полные индексы Соболя по суррогату
+  lhs2   — второй круг: поле 240 мкм, 12 факторов (κ 1–4, разброс 1–4 °C), нагрузки 70 и 140 МПа, морфология
   grad   — С2: полоса 430 × 120 мкм с поверхностями, профиль +80 → −20 МПа (участки 0° колец)
   hyd    — С4: водород 160 / 300 / 450 ppm при 60 и 120 МПа
   tube   — трубы под давлением: двухосно (σz = σθ/2), σ ∝ T, 0.5 °C/мин (tube4 — ещё 2 затравки)
@@ -51,9 +52,17 @@ FACTORS = [("bias_dT", 0.0, 10.0, "lin"), ("app_dT", 0.06, 0.10, "lin"), ("Delta
            ("wang", 0.0, 1.0, "bin")]
 
 
+# второй круг (calib_plan.md, п. 8): поле 240 мкм, морфология в выходе; κ и разброс по зёрнам — шире (они решают,
+# россыпь или длинные линии); χ0, χ_s, упрочнение, правило межзёренных — на номинале (малые ST в первом круге)
+FACTORS2 = [("bias_dT", 2.0, 8.0, "lin"), ("app_dT", 0.06, 0.10, "lin"), ("Delta0", 150.0, 800.0, "log"),
+            ("k_tip", 0.01, 0.25, "log"), ("gb_dT", 0.5, 3.0, "lin"), ("dT_s", 1.0, 4.0, "lin"),
+            ("kappa", 1.0, 4.0, "log"), ("plast_sy", 150.0, 260.0, "lin"), ("grain", 3.0, 8.0, "lin"),
+            ("L_max", 4.0, 12.0, "lin"), ("cross_tol", 0.0, 30.0, "lin"), ("mem_keep", 0.0, 1.0, "lin")]
+
+
 def params_of(kw):
     kw = dict(kw)
-    for k in ("mem_keep", "wang", "grain", "sigmas", "tag", "memory", "loads"):
+    for k in ("mem_keep", "wang", "grain", "sigmas", "tag", "memory", "loads", "factor_set"):
         kw.pop(k, None)
     return kw
 
@@ -134,6 +143,16 @@ def cases(mode):
         return [(f"kappa{k:g}_dts{d:g}_seed{s}", dict(seed=s, kappa=float(k), dT_s=float(d), size_um=(240.0, 240.0),
                                                      sigmas=(0.0, 60.0, 100.0, 150.0)))
                 for k in (KAPPAS or (2.7, 5.4)) for d in (3.0,) for s in (1, 2)]
+    if mode == "lhs2":
+        n = int(os.environ.get("LHS_N", "100"))
+        U = lhs(n, len(FACTORS2), np.random.default_rng(2027))
+        out = []
+        for i, u in enumerate(U):
+            kw = dict(seed=3000 + i, size_um=(240.0, 240.0), sigmas=(70.0, 140.0), factor_set="FACTORS2")
+            for (name, lo, hi, sc), x in zip(FACTORS2, u):
+                kw[name] = float(lo * (hi / lo) ** x) if sc == "log" else float(lo + (hi - lo) * x)
+            out.append((f"lhs2_{i:03d}", kw))
+        return out
     if mode == "lhs":
         n = int(os.environ.get("LHS_N", "200"))
         U = lhs(n, len(FACTORS), np.random.default_rng(2026))

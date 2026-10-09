@@ -7,6 +7,7 @@ python bench_report.py lhs   папка [папка_шума]    — сурро�
 python bench_report.py etch  папка                 — этап 1: утолщение травлением по площади до опыта, F_l до опыта
 python bench_report.py remeasure папка [...]       — пересъёмка мер по снимку из сохранённых полей (observe.ETCH_UM)
 python bench_report.py match папка папка_шума      — согласование с данными калибровки (history matching) и прогнозы на нём
+python bench_report.py lhs2  папка                 — второй круг: Соболь по Fn лаборатории и морфологии
 python bench_report.py calib папка [папка_шума]    — фора как функция остальных факторов, откалиброванные прогнозы и их полоса
 """
 import glob
@@ -203,7 +204,7 @@ def _gp_fit(X, y, noise_sd=None, cv=False):
     ok = np.isfinite(y)
     mu, sd = y[ok].mean(), y[ok].std() + 1e-12
     nz = (noise_sd / sd) ** 2 if noise_sd else 0.1
-    white = WhiteKernel(nz, "fixed") if noise_sd else WhiteKernel(0.1, (1e-3, 1.0))
+    white = WhiteKernel(nz, "fixed") if noise_sd else WhiteKernel(0.1, (0.02, 1.0))
     kern = ConstantKernel(1.0, (0.01, 10.0)) * RBF(length_scale=np.ones(X.shape[1]), length_scale_bounds=(0.2, 100.0)) + white
     mk = lambda: GaussianProcessRegressor(kern, n_restarts_optimizer=3, random_state=0)
     yy = (y[ok] - mu) / sd
@@ -216,11 +217,17 @@ def _gp_fit(X, y, noise_sd=None, cv=False):
     return (lambda Z: gp.predict(Z) * sd + mu), q2, gp, float(nz)
 
 
+def factors_of(rows):
+    """Набор факторов плана (bench.FACTORS или FACTORS2 — по полю factor_set строк)."""
+    import bench
+    return getattr(bench, rows[0].get("factor_set", "FACTORS"))
+
+
 def noise_sd(noise_folder, stage, key):
-    """Затравочный разброс меры по повторам номинала (bench noise, поле 160 мкм)."""
+    """Затравочный разброс меры по повторам номинала (bench noise, поле 160 мкм); нет меры — None (шум оценивается)."""
     if not noise_folder:
         return None
-    v = np.array([r[stage][key] for r in load(noise_folder, "nom160") if stage in r], float)
+    v = np.array([r[stage][key] for r in load(noise_folder, "nom160") if stage in r and key in r[stage]], float)
     v = v[np.isfinite(v)]
     return float(v.std(ddof=1)) if len(v) > 2 else None
 
@@ -363,6 +370,39 @@ def rep_match(folder, noise_folder, n=200000, cut=3.0, disc=0.03):
     json.dump(dict(frac=float(keep.mean()), pred=out), open(os.path.join(folder, "match.json"), "w"), indent=1)
 
 
+def rep_lhs2(folder):
+    """Второй круг: индексы Соболя по ориентации (Fn лаборатории) и морфологии (M_*) до опыта и под нагрузкой."""
+    from SALib.sample import saltelli
+    from SALib.analyze import sobol
+    rows = load(folder, "lhs2")
+    FACTORS = factors_of(rows)
+    names = [f[0] for f in FACTORS]
+
+    def unit(r):
+        return [np.log(r[k] / lo) / np.log(hi / lo) if sc == "log" else (r[k] - lo) / (hi - lo) for k, lo, hi, sc in FACTORS]
+    X = np.array([unit(r) for r in rows])
+    stages = ["before"] + [k for k in rows[0] if k.startswith("s") and k[1:].replace(".", "").isdigit()]
+    keys = ("Fn_lab", "M_L_obj_w", "M_L_seg_w", "M_spacing_r", "M_skel_density")
+    problem = dict(num_vars=len(names), names=names, bounds=[[0, 1]] * len(names))
+    Xs = saltelli.sample(problem, 2048, calc_second_order=False)
+    out = {}
+    print(f"точек: {len(rows)}; факторы: {', '.join(names)}")
+    for stage in stages:
+        for key in keys:
+            y = np.array([r[stage].get(key, np.nan) for r in rows], float)
+            if np.isfinite(y).sum() < 20:
+                continue
+            f, q2, gp, nz = _gp_fit(X, y, None, cv=True)
+            Si = sobol.analyze(problem, f(Xs), calc_second_order=False, print_to_console=False)
+            out[f"{key}@{stage}"] = dict(Q2=q2, noise_frac=nz, mean=float(np.nanmean(y)), p10=float(np.nanpercentile(y, 10)),
+                                         p90=float(np.nanpercentile(y, 90)), ST=dict(zip(names, map(float, Si["ST"]))),
+                                         S1=dict(zip(names, map(float, Si["S1"]))))
+            top = sorted(names, key=lambda n: -Si["ST"][names.index(n)])[:5]
+            print(f"{key + '@' + stage:22s} Q²={q2:.2f} шум={nz:.2f} | {np.nanpercentile(y, 10):.3g}–{np.nanpercentile(y, 90):.3g} | "
+                  + ", ".join(f"{n} {Si['ST'][names.index(n)]:.2f}/{Si['S1'][names.index(n)]:.2f}" for n in top), flush=True)
+    json.dump(out, open(os.path.join(folder, "sobol2.json"), "w"), indent=1, ensure_ascii=False)
+
+
 def rep_etch(folder, target=0.115, grid=(0.0, 1.0, 2.0, 3.0, 4.0, 5.0)):
     """Этап 1: утолщение травлением по доле площади до опыта (снимки колец до опыта: 11–12 %), затем F_l до опыта
     тем же оператором (опыт: 0.097–0.125) — проверка без новой подгонки."""
@@ -394,6 +434,8 @@ if __name__ == "__main__":
         rep_lhs(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None)
     elif mode == "etch":
         rep_etch(sys.argv[2])
+    elif mode == "lhs2":
+        rep_lhs2(sys.argv[2])
     elif mode == "calib":
         rep_calib(sys.argv[2], noise_folder=sys.argv[3] if len(sys.argv) > 3 else None)
     elif mode == "match":
