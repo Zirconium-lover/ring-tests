@@ -3,10 +3,10 @@
 python bench_report.py bias  папка                 — порог σ* от форы, фора под 45 МПа
 python bench_report.py noise папка                 — шум мер (среднее ± разброс по затравкам), поле 160 и 240 мкм
 python bench_report.py knock папка папка_шума      — вклад механизма при всех прочих: выключенный − номинал (те же затравки)
-python bench_report.py lhs   папка                 — суррогат (гауссов процесс) и индексы Соболя S1, ST по каждой мере
+python bench_report.py lhs   папка [папка_шума]    — суррогат (гауссов процесс, шум — по повторам номинала) и индексы Соболя ST/S1
 python bench_report.py etch  папка                 — этап 1: утолщение травлением по площади до опыта, F_l до опыта
 python bench_report.py remeasure папка [...]       — пересъёмка мер по снимку из сохранённых полей (observe.ETCH_UM)
-python bench_report.py calib папка                 — фора как функция остальных факторов, откалиброванные прогнозы и их полоса
+python bench_report.py calib папка [папка_шума]    — фора как функция остальных факторов, откалиброванные прогнозы и их полоса
 """
 import glob
 import json
@@ -156,10 +156,7 @@ def rep_knock(folder, nom_folder):
                 print(f"  {'':14s} {key} при {s0[-2]:g} МПа: {d.mean():+.2f}±{d.std(ddof=1) / np.sqrt(len(d)):.2f}")
 
 
-def rep_lhs(folder):
-    from sklearn.gaussian_process import GaussianProcessRegressor
-    from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
-    from sklearn.model_selection import cross_val_predict
+def rep_lhs(folder, noise_folder=None):
     from SALib.sample import saltelli
     from SALib.analyze import sobol
     from bench import FACTORS
@@ -167,59 +164,65 @@ def rep_lhs(folder):
     names = [f[0] for f in FACTORS]
 
     def unit(r):
-        u = []
-        for name, lo, hi, sc in FACTORS:
-            x = r[name]
-            u.append(np.log(x / lo) / np.log(hi / lo) if sc == "log" else (x - lo) / (hi - lo))
-        return u
+        return [np.log(r[n] / lo) / np.log(hi / lo) if sc == "log" else (r[n] - lo) / (hi - lo) for n, lo, hi, sc in FACTORS]
     X = np.array([unit(r) for r in rows])
     s0 = sigmas(rows[0])
-    targets = {"before_F_l": lambda r: r["before"]["F_l"]}
-    for v in s0:
-        targets[f"F_l@{v:g}"] = (lambda v_: lambda r: r[f"s{v_:g}"]["F_l"])(v)
-    targets["sigma*"] = lambda r: min(sigma_star(r), 200.0)
-    targets[f"RHCF@{s0[-2]:g}"] = lambda r: r[f"s{s0[-2]:g}"]["RHCF"]
-    targets[f"RHCP@{s0[-2]:g}"] = lambda r: r[f"s{s0[-2]:g}"]["RHCP"]
-    targets[f"GB_frac@{s0[-2]:g}"] = lambda r: r[f"s{s0[-2]:g}"]["GB_frac"]
-    targets[f"L_plate@{s0[-2]:g}"] = lambda r: r[f"s{s0[-2]:g}"]["L_plate_mean"]
+    sm = f"s{s0[-2]:g}"
+    targets = [("before", "F_l")] + [(f"s{v:g}", "F_l") for v in s0] + [(sm, k) for k in ("RHCF", "RHCP", "GB_frac", "L_plate_mean", "n_plates")]
     problem = dict(num_vars=len(names), names=names, bounds=[[0, 1]] * len(names))
     Xs = saltelli.sample(problem, 2048, calc_second_order=False)
     Xs[:, names.index("wang")] = np.round(Xs[:, names.index("wang")])      # правило — да/нет, не промежуточное
     out = {}
     print(f"точек плана: {len(rows)}; факторы: {', '.join(names)}")
-    for tname, fn in targets.items():
-        y = np.array([fn(r) for r in rows], float)
-        ok = np.isfinite(y)
-        if ok.sum() < 20:
+    for stage, key in targets:
+        y = np.array([r[stage][key] for r in rows], float)
+        if np.isfinite(y).sum() < 20:
             continue
-        mu, sd = y[ok].mean(), y[ok].std() + 1e-12
-        kern = ConstantKernel(1.0) * RBF(length_scale=np.ones(len(names)), length_scale_bounds=(0.05, 50.0)) + WhiteKernel(0.1)
-        gp = GaussianProcessRegressor(kern, normalize_y=False, n_restarts_optimizer=2, random_state=0)
-        yy = (y[ok] - mu) / sd
-        pred = cross_val_predict(gp, X[ok], yy, cv=5)
-        q2 = 1 - np.mean((pred - yy) ** 2) / np.var(yy)
-        gp.fit(X[ok], yy)
-        noise = float(gp.kernel_.k2.noise_level)
-        Si = sobol.analyze(problem, gp.predict(Xs), calc_second_order=False, print_to_console=False)
-        out[tname] = dict(Q2=float(q2), noise_frac=noise, S1=dict(zip(names, map(float, Si["S1"]))),
-                          ST=dict(zip(names, map(float, Si["ST"]))), mean=float(mu), sd=float(sd))
+        nsd = noise_sd(noise_folder, stage, key)
+        f, q2, gp, nz = _gp_fit(X, y, nsd, cv=True)
+        Si = sobol.analyze(problem, f(Xs), calc_second_order=False, print_to_console=False)
+        tname = f"{key}@{stage}"
+        # доля шума в дисперсии меры по плану и потолок Q² при таком шуме
+        out[tname] = dict(Q2=q2, noise_frac=nz, Q2_max=1 - nz, S1=dict(zip(names, map(float, Si["S1"]))),
+                          ST=dict(zip(names, map(float, Si["ST"]))), ST_conf=dict(zip(names, map(float, Si["ST_conf"]))),
+                          mean=float(np.nanmean(y)), sd=float(np.nanstd(y)))
         top = sorted(names, key=lambda n: -Si["ST"][names.index(n)])[:6]
-        print(f"{tname:14s} Q²={q2:.2f} шум={noise:.2f} | " + ", ".join(
-            f"{n} ST {Si['ST'][names.index(n)]:.2f} (S1 {Si['S1'][names.index(n)]:.2f})" for n in top))
+        print(f"{tname:18s} Q²={q2:.2f} (потолок {1 - nz:.2f}) | " + ", ".join(
+            f"{n} {Si['ST'][names.index(n)]:.2f}/{Si['S1'][names.index(n)]:.2f}" for n in top), flush=True)
     json.dump(out, open(os.path.join(folder, "sobol.json"), "w"), indent=1, ensure_ascii=False)
 
 
-def _gp_fit(X, y):
+def _gp_fit(X, y, noise_sd=None, cv=False):
+    """Гауссов процесс с ARD. Шум — затравочный разброс меры, измеренный на повторах номинала (noise_sd): без него
+    суррогат подгоняет шум (Q² < 0). → (предсказатель, Q² по перекрёстной проверке или None)."""
     from sklearn.gaussian_process import GaussianProcessRegressor
     from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
     ok = np.isfinite(y)
     mu, sd = y[ok].mean(), y[ok].std() + 1e-12
-    kern = ConstantKernel(1.0) * RBF(length_scale=np.ones(X.shape[1]), length_scale_bounds=(0.05, 50.0)) + WhiteKernel(0.1)
-    gp = GaussianProcessRegressor(kern, n_restarts_optimizer=2, random_state=0).fit(X[ok], (y[ok] - mu) / sd)
-    return lambda Z: gp.predict(Z) * sd + mu
+    nz = (noise_sd / sd) ** 2 if noise_sd else 0.1
+    white = WhiteKernel(nz, "fixed") if noise_sd else WhiteKernel(0.1, (1e-3, 1.0))
+    kern = ConstantKernel(1.0, (0.01, 10.0)) * RBF(length_scale=np.ones(X.shape[1]), length_scale_bounds=(0.2, 100.0)) + white
+    mk = lambda: GaussianProcessRegressor(kern, n_restarts_optimizer=3, random_state=0)
+    yy = (y[ok] - mu) / sd
+    q2 = None
+    if cv:
+        from sklearn.model_selection import cross_val_predict
+        pred = cross_val_predict(mk(), X[ok], yy, cv=5)
+        q2 = float(1 - np.mean((pred - yy) ** 2) / np.var(yy))
+    gp = mk().fit(X[ok], yy)
+    return (lambda Z: gp.predict(Z) * sd + mu), q2, gp, float(nz)
 
 
-def rep_calib(folder, level=LEVEL, s_target=45.0, n_mc=3000):
+def noise_sd(noise_folder, stage, key):
+    """Затравочный разброс меры по повторам номинала (bench noise, поле 160 мкм)."""
+    if not noise_folder:
+        return None
+    v = np.array([r[stage][key] for r in load(noise_folder, "nom160") if stage in r], float)
+    v = v[np.isfinite(v)]
+    return float(v.std(ddof=1)) if len(v) > 2 else None
+
+
+def rep_calib(folder, level=LEVEL, s_target=45.0, n_mc=3000, noise_folder=None):
     """Фора как функция остальных неопределённых факторов: по суррогатам F_l(σ) для каждого набора факторов ищется
     фора, при которой кривая проходит уровень level при s_target (порог колец). Затем откалиброванные прогнозы
     (до опыта, F_l(σ), RHCF) — их полоса от неопределённости остальных факторов и доли (первого порядка, по
@@ -233,9 +236,11 @@ def rep_calib(folder, level=LEVEL, s_target=45.0, n_mc=3000):
         return [np.log(r[n] / lo) / np.log(hi / lo) if sc == "log" else (r[n] - lo) / (hi - lo) for n, lo, hi, sc in FACTORS]
     X = np.array([unit(r) for r in rows])
     s0 = sigmas(rows[0])
-    gps = {v: _gp_fit(X, np.array([r[f"s{v:g}"]["F_l"] for r in rows], float)) for v in s0}
-    g_before = _gp_fit(X, np.array([r["before"]["F_l"] for r in rows], float))
-    g_rhcf = _gp_fit(X, np.array([r[f"s{s0[-2]:g}"]["RHCF"] for r in rows], float))
+    gps = {v: _gp_fit(X, np.array([r[f"s{v:g}"]["F_l"] for r in rows], float), noise_sd(noise_folder, f"s{v:g}", "F_l"))[0]
+           for v in s0}
+    g_before = _gp_fit(X, np.array([r["before"]["F_l"] for r in rows], float), noise_sd(noise_folder, "before", "F_l"))[0]
+    g_rhcf = _gp_fit(X, np.array([r[f"s{s0[-2]:g}"]["RHCF"] for r in rows], float),
+                     noise_sd(noise_folder, f"s{s0[-2]:g}", "RHCF"))[0]
     rng = np.random.default_rng(1)
     Z = rng.random((n_mc, len(names)))
     iw = names.index("wang"); Z[:, iw] = np.round(Z[:, iw])
@@ -312,11 +317,11 @@ if __name__ == "__main__":
     elif mode == "knock":
         rep_knock(sys.argv[2], sys.argv[3])
     elif mode == "lhs":
-        rep_lhs(sys.argv[2])
+        rep_lhs(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None)
     elif mode == "etch":
         rep_etch(sys.argv[2])
     elif mode == "calib":
-        rep_calib(sys.argv[2])
+        rep_calib(sys.argv[2], noise_folder=sys.argv[3] if len(sys.argv) > 3 else None)
     elif mode == "remeasure":
         for d in sys.argv[2:]:
             remeasure(d)
