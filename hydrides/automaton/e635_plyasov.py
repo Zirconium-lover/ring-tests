@@ -156,6 +156,11 @@ def cases(mode):
                  for s in (0, 50, 70, 90, 110, 140) for sd in (1, 2)]
                 + [dict(H_ppm=h, rate=0.5, bias_dT=4.0, dT_s=ds, sigma_app=s, sigma_T0=400.0, seed=1)
                    for h in (150.0, 300.0, 400.0) for s in (50, 90, 140)])
+    if mode == "m1w":      # межзёренные по Wang 2019 (gb_rule="wang"): проверка порога при форе 4 °C
+        return [dict(H_ppm=160.0, rate=0.75, bias_dT=4.0, gb_rule="wang", sigma_app=s, seed=sd)
+                for s in (30, 45, 60) for sd in (1, 2)]
+    if mode == "rings0w":  # участки 0° кольца с межзёренными по Wang
+        return [dict(c, bias_dT=4.0, gb_rule="wang") for c in cases("ring") if c["bias_dT"] == 5.0 and c["ring"] in ("S1_0", "S2_0")]
     if mode == "zry":      # для сравнения: фора холоднодеформированного Zircaloy-4 (17 °C) на Э635
         return [dict(H_ppm=210.0, rate=0.5, bias_dT=17.0, sigma_app=s, sigma_T0=400.0, seed=1)
                 for s in (0, 50, 90, 140)]

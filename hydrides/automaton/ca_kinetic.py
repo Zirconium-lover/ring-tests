@@ -17,6 +17,7 @@ B — барьер в kT на линии TSSP (классическая теор
 Избирательность по g вблизи линии: d ln r/dg ≈ 2·B·ε_n/Δ0.
 """
 from dataclasses import dataclass
+import os
 import numpy as np
 from scipy import ndimage as ndi
 import scipy.fft as sfft
@@ -80,6 +81,10 @@ class KParams(Params):
     gb_dT: float = 0.0              # °C: фора зарождения на границе против тела зерна (ниже барьер)
     gb_dT_s: float = 0.0            # °C: разброс форы по граням (энергия границы зависит от разориентации)
     gb_tol: float = 15.0            # град: допуск между следом грани и базисным следом соседа
+    gb_rule: str = "trace"          # "trace" — пластинка вдоль грани, близкой к базису соседа (как раньше);
+                                    # "wang" — зарождение на любой клетке границы, пластинка по габитусу одного из двух
+                                    # соседей уходит от границы в его зерно; вес места — по Wang и др. 2019 (рис. 13:
+                                    # разориентация осей c; рис. 15: угол следа границы к базису), data_lit/wang2019_gb.json
     gb_L_max: float = 0.0           # наибольшая длина межзёренной пластинки (0 — как L_max)
     # рост во времени: зародыш длиной L_min, кончики идут со скоростью v = k_tip·D/h·(c − TSSD)/C_гидрида
     # (k_tip = 1 — предел по диффузии к кончику радиусом h/2; рост медленнее — k_tip < 1, как в HNGD)
@@ -152,9 +157,29 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         # грани, след которых близок (gb_tol) к базисному следу хотя бы одного из двух соседей
         ang = lambda a, b: np.abs((a - b + np.pi / 2) % np.pi - np.pi / 2)
         d1, d2 = ang(gbd["psi"], gpsi[gbd["pair"][:, 0]]), ang(gbd["psi"], gpsi[gbd["pair"][:, 1]])
-        keep = np.minimum(d1, d2) <= np.radians(p.gb_tol)
-        gcell, gpair, gpsi_f = gbd["cells"][keep], gbd["pair"][keep], gbd["psi"][keep]
-        gmatch = np.where(d1[keep] <= d2[keep], gpair[:, 0], gpair[:, 1])     # зерно с соотношением ориентаций
+        if p.gb_rule == "wang":
+            # каждая клетка границы — два места: пластинка по габитусу зерна-соседа (0 или 1), растёт в это зерно
+            import json as _json
+            W = _json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data_lit", "wang2019_gb.json")))
+            sm = lambda a: np.convolve(np.pad(np.asarray(a, float), 1, mode="edge"), np.ones(3) / 3, mode="valid")
+            w_mis = sm(np.asarray(W["fig13_hydride"]) / np.asarray(W["fig13_all"]))
+            w_tr = sm(W["fig15_hydride"]); w_tr = np.maximum(w_tr / w_tr.mean(), 0.1)
+            mid = np.arange(2.5, 90, 5.0)
+            nc = len(gbd["cells"])
+            gcell = np.concatenate([gbd["cells"], gbd["cells"]])
+            gpair = np.concatenate([gbd["pair"], gbd["pair"]])
+            gside = np.concatenate([gbd["pair"][:, 0], gbd["pair"][:, 1]])
+            psi_face = np.concatenate([gbd["psi"], gbd["psi"]])
+            gpsi_f = gpsi[gside]                                              # пластинка — габитус своего зерна
+            dmis = np.degrees(ang(gpsi[gpair[:, 0]], gpsi[gpair[:, 1]]))       # разориентация осей c (в сечении)
+            dtr = np.degrees(ang(psi_face, gpsi_f))                            # след границы к базису зерна
+            ln_w_gb = np.log(np.interp(dmis, mid, w_mis)) + np.log(np.interp(dtr, mid, w_tr))
+            gmatch = gside
+        else:
+            keep = np.minimum(d1, d2) <= np.radians(p.gb_tol)
+            gcell, gpair, gpsi_f = gbd["cells"][keep], gbd["pair"][keep], gbd["psi"][keep]
+            gmatch = np.where(d1[keep] <= d2[keep], gpair[:, 0], gpair[:, 1])     # зерно с соотношением ориентаций
+            ln_w_gb = 0.0
         uniq, gpid = np.unique(gpair, axis=0, return_inverse=True)
         gpid = gpid.ravel()
         pid_map = np.full(ny * nx, -1); pid_map[gcell] = gpid; pid_map = pid_map.reshape(ny, nx)
@@ -174,6 +199,33 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         tried_gb = np.zeros(ngb, bool)
         noroom_gb = np.zeros(ngb, bool)
         L_gb = p.gb_L_max if p.gb_L_max > 0 else p.L_max
+
+        def grow_side(k, occ_b):
+            """Пластинка по габитусу зерна gmatch[k] от клетки границы внутрь этого зерна (Wang 2019): в каждую
+            сторону — пока то же зерно и свободно; клетка зарождения может принадлежать соседу."""
+            iy0, ix0 = divmod(int(gcell[k]), nx)
+            psi = gpsi_f[k]; g0 = gmatch[k]
+            ty, tx = -np.sin(psi), np.cos(psi)
+            step = p.dx * 0.5
+            ext = []
+            for sgn in (1, -1):
+                d = 0.0; entered = grains[iy0, ix0] == g0
+                while d < p.L_max / 2:
+                    d2 = d + step
+                    iy = int(np.floor(((iy0 + 0.5) * p.dx + sgn * d2 * ty) / p.dx)) % ny
+                    ix = int(np.floor(((ix0 + 0.5) * p.dx + sgn * d2 * tx) / p.dx)) % nx
+                    if occ_b[iy, ix]:
+                        break
+                    if grains[iy, ix] != g0:
+                        if entered or d2 > 1.5 * p.dx:
+                            break
+                    else:
+                        entered = True
+                    d = d2
+                ext.append(d if entered else 0.0)
+            a, b = ext
+            shift = 0.5 * (a - b)
+            return np.array([(iy0 + 0.5) * p.dx + shift * ty, (ix0 + 0.5) * p.dx + shift * tx]), 0.5 * (a + b)
 
         def grow_gb(k, occ_b):
             """Пластинка по следу грани от клетки k, пока рядом (3×3) клетки той же грани и свободно."""
@@ -240,7 +292,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
             d = ang(gpsi[gq], psi)
             if d <= np.radians(p.cross_tol):
                 best = (d, "intra", gq, gpsi[gq])
-        if ngb:
+        if ngb and p.gb_rule != "wang":                 # по Wang межзёренные растут в зерно, по граням не идут
             win = pid_map[np.arange(iy - 1, iy + 2)[:, None] % ny, np.arange(ix - 1, ix + 2)[None, :] % nx]
             for f_id in np.unique(win[win >= 0]):
                 if e["kind"] == "gb" and f_id == e["gid"]:
@@ -507,7 +559,8 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
                 + EPS_N * g_gb + N_H_MPa_per_K * Q_over_R / Tk * (dT_gb + (fac - 1.0) * dT_gb_app)
             ok_gb = (Delta_gb > 0) & ~occ.ravel()[gcell] & ~tried_gb & ~noroom_gb & h_ok.ravel()[gcell]
             lnr_gb = np.full(ngb, -np.inf)
-            lnr_gb[ok_gb] = np.log(p.nu_c) + ln_gbcell - p.B * ((p.Delta0 / Delta_gb[ok_gb]) ** 2 - 1.0)
+            lnr_gb[ok_gb] = np.log(p.nu_c) + ln_gbcell - p.B * ((p.Delta0 / Delta_gb[ok_gb]) ** 2 - 1.0) \
+                + (ln_w_gb[ok_gb] if np.ndim(ln_w_gb) else ln_w_gb)
         else:
             ok_gb = np.zeros(0, bool); lnr_gb = np.zeros(0)
         q = (p.rate2 if (p.rate2 > 0 and T <= p.T_rate2) else p.rate) / 60.0
@@ -541,7 +594,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
                     cc, half = grow(ci, psi, grains, occ_b, p)
                 else:
                     psi = gpsi_f[kgb]
-                    cc, half = grow_gb(kgb, occ_b)
+                    cc, half = grow_side(kgb, occ_b) if p.gb_rule == "wang" else grow_gb(kgb, occ_b)
                 if 2 * half < p.L_min:                  # не помещается (зерно, грань, соседи) — больше не разыгрывать
                     if kgb < 0:
                         noroom[ci] = True
@@ -575,8 +628,11 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
                 if p.grow_kin:
                     pid = len(plates) - 1
                     claim(cc, psi, half, pid)
-                    new_tip(pid, cc - half * tv, cc + half * tv, psi, "intra" if kgb < 0 else "gb",
-                            grains[ci] if kgb < 0 else gpid[kgb])
+                    if kgb >= 0 and p.gb_rule == "wang":      # дальше растёт как внутризёренная в своём зерне
+                        new_tip(pid, cc - half * tv, cc + half * tv, psi, "intra", gmatch[kgb])
+                    else:
+                        new_tip(pid, cc - half * tv, cc + half * tv, psi, "intra" if kgb < 0 else "gb",
+                                grains[ci] if kgb < 0 else gpid[kgb])
             if batch:
                 add_batch(batch, deplete=False, extra=halo_update(range(n_before, len(plates))) if p.halo else None,
                           solve=False)
