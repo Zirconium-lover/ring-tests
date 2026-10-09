@@ -6,7 +6,7 @@
   возврат по Мизесу с линейным упрочнением: Δp = ⟨σ_tr,eq − (σ_y + h·p_n)⟩ / (3μ + h), Δε_p = 1.5·Δp·s_tr/σ_tr,eq;
   поправка напряжений — упругое решение Фурье от изменения Δε_p (задача линейна, суперпозиция точна);
   повторять, пока превышение текучести в матрице больше tol (неподвижная точка).
-Нагрузка входит в проверку текучести (σ_xx — окружное), в поле S автомата — нет (как и раньше).
+Нагрузка входит в проверку текучести (σ_xx — окружное, σ_zz — осевое у труб), в поле S автомата — нет (как и раньше).
 Зоны соседних пластинок сливаются сами, у предела текучести течёт общая область, после растворения ε_p остаётся.
 
 Проверка (fe/proto_collective.py): одиночная пластинка и стопка «бок о бок», Э635 (σ_y 226, h 200), 0 / 110 / 200 МПа —
@@ -71,23 +71,23 @@ class Plasticity:
     def _eq(d11, d22, d33, d12):
         return np.sqrt(1.5 * (d11 ** 2 + d22 ** 2 + d33 ** 2 + 2.0 * d12 ** 2))
 
-    def _step(self, S, sxx, dE, Y, mtx, K):
+    def _step(self, S, sxx, dE, Y, mtx, K, szz=0.0):
         """Один шаг локального предиктора: новое Δε_p (за эту релаксацию) и Δp."""
-        s11 = S[0] + sxx
-        m = (s11 + S[1] + S[3]) / 3.0
-        t11, t22, t33, t12 = s11 - m + K * dE[0], S[1] - m + K * dE[1], S[3] - m + K * dE[3], S[2] + K * dE[2]
+        s11 = S[0] + sxx; s33 = S[3] + szz
+        m = (s11 + S[1] + s33) / 3.0
+        t11, t22, t33, t12 = s11 - m + K * dE[0], S[1] - m + K * dE[1], s33 - m + K * dE[3], S[2] + K * dE[2]
         eqt = self._eq(t11, t22, t33, t12)
         ndp = np.where(mtx, np.maximum(eqt - Y, 0.0), 0.0) / (1.5 * K + self.hard)
         k = 1.5 * ndp / np.maximum(eqt, 1e-12)
         return [k * t11, k * t22, k * t12, k * t33], ndp
 
-    def _over(self, S, sxx, Y, dp, mtx):
-        s11 = S[0] + sxx
-        m = (s11 + S[1] + S[3]) / 3.0
-        eq = self._eq(s11 - m, S[1] - m, S[3] - m, S[2])
+    def _over(self, S, sxx, Y, dp, mtx, szz=0.0):
+        s11 = S[0] + sxx; s33 = S[3] + szz
+        m = (s11 + S[1] + s33) / 3.0
+        eq = self._eq(s11 - m, S[1] - m, s33 - m, S[2])
         return np.where(mtx, eq - (Y + self.hard * dp), -np.inf)
 
-    def relax(self, S, mtx, sxx_app=0.0, tol=5.0, maxit=100, c=0.5, outer=6):
+    def relax(self, S, mtx, sxx_app=0.0, tol=5.0, maxit=100, c=0.5, outer=6, szz_app=0.0):
         """Как relax_global, но итерации — в окнах вокруг клеток, где превышена текучесть (функция влияния, точная
         внутри окна), а упругое решение на всём поле — одно на внешний проход (дальнее поле). Окно больше wmax —
         общая текучесть: глобальная итерация. Возвращает число итераций (сумма по окнам и проходам)."""
@@ -96,10 +96,11 @@ class Plasticity:
         dE = [np.zeros_like(self.p) for _ in range(4)]
         dp = np.zeros_like(self.p)
         sxx = sxx_app if np.ndim(sxx_app) else np.full(self.shape, float(sxx_app))
+        szz = szz_app if np.ndim(szz_app) else np.full(self.shape, float(szz_app))   # осевое приложенное (труба)
         applied = [np.zeros_like(self.p) for _ in range(4)]   # Δε_p, уже учтённое в S
         n_it = 0
         for _ in range(outer):
-            over = self._over(S, sxx, Y, dp, mtx)
+            over = self._over(S, sxx, Y, dp, mtx, szz)
             act = over > tol
             if not act.any():
                 break
@@ -107,24 +108,24 @@ class Plasticity:
             boxes = ndi.find_objects(lab)
             if any(b[0].stop - b[0].start > self.wmax or b[1].stop - b[1].start > self.wmax for b in boxes):
                 # общая текучесть: окна не помогают — глобальная итерация (с учётом уже сделанного Δε_p)
-                n_it += self.relax_global(S, mtx, sxx, tol, maxit, c, dE0=dE, dp0=dp, applied=applied)
+                n_it += self.relax_global(S, mtx, sxx, tol, maxit, c, dE0=dE, dp0=dp, applied=applied, szz_app=szz)
                 return self._finish(dE, dp, n_it)
             for sl in boxes:
                 wy, wx = sl[0].stop - sl[0].start, sl[1].stop - sl[1].start
                 wy8, wx8 = -(-wy // 8) * 8, -(-wx // 8) * 8           # округление — меньше размеров окон в кэше
                 Sw = [a[sl].copy() for a in S]
                 dEw = [a[sl].copy() for a in dE]; dpw = dp[sl].copy()
-                mw, Yw, sw = mtx[sl], Y[sl], sxx[sl]
+                mw, Yw, sw, zw = mtx[sl], Y[sl], sxx[sl], szz[sl]
                 cc = c
                 for it in range(maxit):
-                    ow = float(np.max(self._over(Sw, sw, Yw, dpw, mw)))
+                    ow = float(np.max(self._over(Sw, sw, Yw, dpw, mw, zw)))
                     if ow < tol:
                         break
                     if not np.isfinite(ow) or ow > 1e4:                # разошлось — заново, осторожно
                         Sw = [a[sl].copy() for a in S]; dEw = [a[sl].copy() for a in dE]; dpw = dp[sl].copy()
                         cc = 1.0
                         continue
-                    new, ndp = self._step(Sw, sw, dEw, Yw, mw, 2 * mu * cc)
+                    new, ndp = self._step(Sw, sw, dEw, Yw, mw, 2 * mu * cc, zw)
                     dd = [n - d for n, d in zip(new, dEw)]
                     dS = self._conv([np.pad(d, ((0, wy8 - wy), (0, wx8 - wx))) for d in dd], wy8, wx8)
                     for a, b in zip(Sw, dS):
@@ -148,7 +149,7 @@ class Plasticity:
         self.its.append(n_it)
         return n_it
 
-    def relax_global(self, S, mtx, sxx_app=0.0, tol=5.0, maxit=100, c=0.5, dE0=None, dp0=None, applied=None):
+    def relax_global(self, S, mtx, sxx_app=0.0, tol=5.0, maxit=100, c=0.5, dE0=None, dp0=None, applied=None, szz_app=0.0):
         """S = [S11, S22, S12, S33] — внутренние напряжения автомата (с прежней ε_p), правятся на месте.
         mtx — клетки матрицы (пластичны); sxx_app — нагрузка по x (число или поле). c — жёсткость клетки в предикторе
         в долях 2μ: зажатая окружением клетка снимает своё напряжение слабее свободной (0.25–0.43 от 2μ по сетке 0.4),
@@ -166,9 +167,9 @@ class Plasticity:
         S0 = [a.copy() for a in S]; dE00 = [a.copy() for a in dE]; dp00 = dp.copy()
         it = 0
         for it in range(maxit):
-            s11 = S[0] + sxx_app
-            m = (s11 + S[1] + S[3]) / 3.0
-            d11, d22, d33, d12 = s11 - m, S[1] - m, S[3] - m, S[2]
+            s11 = S[0] + sxx_app; s33 = S[3] + szz_app
+            m = (s11 + S[1] + s33) / 3.0
+            d11, d22, d33, d12 = s11 - m, S[1] - m, s33 - m, S[2]
             eq = np.sqrt(1.5 * (d11 ** 2 + d22 ** 2 + d33 ** 2 + 2.0 * d12 ** 2))
             over = float(np.max(np.where(mtx, eq - (Y + h * dp), -np.inf))) if mtx.any() else -1.0
             if over < tol:

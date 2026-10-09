@@ -102,6 +102,16 @@ class KParams(Params):
                                     # окружного семейства): все сдвиги отсчитываются вниз на bias_dT + gb_dT
     cross_tol: float = 0.0          # град: упёршись в границу, кончик продолжается в соседнем зерне (или на
                                     # соседней грани), если след там отличается не больше (Fang 2017, Son 2026); 0 — нет
+    # --- calib_plan.md, этап 0 ---
+    walls_um: float = 0.0           # мкм: полосы-поверхности у верха и низа поля (стенка по толщине) — ни зарождения, ни
+                                    # роста; профиль σ — по толщине между ними. Без них поле по толщине замкнуто: гидриды
+                                    # растянутой стороны проходят через стык на сжатую (ревью Р3)
+    gorsky: str = "old"             # "old" — v_h_over_rt·σθ/3 (прежнее: втрое слабее, не сохраняет водород, ревью Р4);
+                                    # "cons" — равновесное перераспределение V_H/RT(T)·(σ_h − ⟨σ_h⟩), σ_h = σθ(1 + sz_ratio)/3
+    sz_ratio: float = 0.0           # σz/σθ приложенного: 0 — кольцо (одноосно), 0.5 — труба под давлением (текучесть, σ_h)
+    init_plast: object = None       # ([e11, e22, e12, e33], p): пластическая деформация и упрочнение прошлого цикла —
+                                    # память о растворённых гидридах (history.py); при T_max: растворение без нагрузки
+                                    # (обратная пластичность), затем нагрузка
 
 
 def run_kinetic(p: KParams, verbose=False, callback=None):
@@ -129,7 +139,11 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     psi_map = gpsi[grains]
     e11n, e22n, e12n = eigen_components_for(psi_map)
     e33n = EPS_T
-    yfrac = (np.arange(ny) + 0.5) / ny
+    nwall = int(round(p.walls_um / p.dx))
+    wall = np.zeros((ny, nx), bool)
+    if nwall:
+        wall[:nwall] = True; wall[ny - nwall:] = True
+    yfrac = np.clip((np.arange(ny) + 0.5 - nwall) / (ny - 2 * nwall), 0.0, 1.0)   # доля толщины между поверхностями
     if p.sigma_prof:
         yp, sp = np.array(p.sigma_prof, float).T
         sapp = np.interp(yfrac, yp, sp)[:, None] * np.ones((1, nx))
@@ -140,6 +154,9 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     if p.app_dg is not None:            # вклад нагрузки по МКЭ (fe/hill_table.json), как в ca_hydride
         g_app = np.interp(sapp, *p.app_dg) * (np.sin(psi_map) ** 2 - 0.5)
     lnc_gorsky = p.v_h_over_rt * sapp / 3.0 if p.v_h_over_rt else 0.0
+    if p.gorsky == "cons":              # σ_h приложенного без среднего по стенке: водород только перераспределяется
+        sh_app = sapp * (1.0 + p.sz_ratio) / 3.0
+        sh_app = sh_app - float(sh_app[~wall].mean())
     # измеренный сдвиг температуры выпадения: нормальное напряжение на пластинке σ_nn = σθ·sin²ψ и фора зёрен
     # с осью c по радиусу (cos²ψ), в градусах; в движущую силу (МПа) — через наклон линии TSSP: n_H·Q/T
     dT_ref = (p.bias_dT + (p.gb_dT if p.gb else 0.0)) if p.tssp_ref else 0.0
@@ -252,7 +269,7 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
             shift = 0.5 * (a - b)
             return np.array([(iy0 + 0.5) * p.dx + shift * ty, (ix0 + 0.5) * p.dx + shift * tx]), 0.5 * (a + b)
     S11 = np.zeros((ny, nx)); S22 = np.zeros_like(S11); S12 = np.zeros_like(S11); S33 = np.zeros_like(S11)
-    occ = np.zeros((ny, nx), bool)
+    occ = wall.copy()                           # занято пластинками (с зазором) и поверхностями
     hyd = np.zeros((ny, nx))
     tried = np.zeros((ny, nx), bool)
     noroom = np.zeros((ny, nx), bool)          # пластинка L_min не помещается; занятость только растёт — навсегда
@@ -278,6 +295,8 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
                          act=list(act), acc=[0.0, 0.0]))
 
     def blocked(iy, ix, pid):
+        if wall[iy % ny, ix % nx]:
+            return True
         w = owner[np.arange(iy - 1, iy + 2)[:, None] % ny, np.arange(ix - 1, ix + 2)[None, :] % nx]
         return bool(((w >= 0) & (w != pid)).any())
 
@@ -460,8 +479,11 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         for a in Epend:
             a.fill(0.0)
         occ[:] = ndi.binary_dilation(hyd > 0.2, iterations=max(1, int(round(p.occ_um / p.dx))) if p.occ_um > 0 else 1)
+        if nwall:
+            occ[wall] = True
         if p.plast:                                     # пластика матрицы до равновесия при текущей нагрузке
-            pm.relax([S11, S22, S12, S33], hyd < 0.5, sapp * fac_now[0], p.plast_tol, p.plast_maxit)
+            pm.relax([S11, S22, S12, S33], hyd < 0.5, sapp * fac_now[0], p.plast_tol, p.plast_maxit,
+                     szz_app=sapp * (fac_now[0] * p.sz_ratio) if p.sz_ratio else 0.0)
         pend[0] = False
         gcache.clear()
 
@@ -499,9 +521,16 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
     # начальное состояние: растворилось до TSSD(T_max), остальное — нерастворившиеся пластинки
     c0 = float(min(p.H_ppm, c_line(p.T_max, L["TSSD"])))
     c = np.full((ny, nx), c0)
+    mem = p.init_plast is not None and p.plast
+    if mem:                                             # память: ε_p и упрочнение прошлого цикла остаются в металле
+        Ep0, p0 = p.init_plast
+        for a, b, e in zip(pm.Ep, Ep0, Epend):
+            a[:] = b; e += b
+        pm.p[:] = p0
+        pend[0] = True
     if p.init_plates is not None and len(p.init_plates):
         init = [(np.array([q[0], q[1]]), q[2], q[3]) for q in p.init_plates]
-        add_batch(init, deplete=False)
+        add_batch(init, deplete=False, solve=not mem)
         for (cc, psi, half) in init:
             iy, ix = int(cc[0] / p.dx) % ny, int(cc[1] / p.dx) % nx
             plates.append(dict(c=cc, psi=float(psi), half=float(half), grain=int(grains[iy, ix]), T=None, t=None, init=True,
@@ -511,6 +540,9 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
                 new_tip(len(plates) - 1, cc - half * tvec(psi), cc + half * tvec(psi), psi, "intra", grains[iy, ix])
         if p.halo:
             add_batch([], deplete=False, extra=halo_update(range(len(plates)), ht0))
+    if mem:
+        fac_now[0] = 0.0; solve_pending()               # при T_max гидриды растворились, нагрузки ещё нет: обратная пластичность
+        fac_now[0] = 1.0; pend[0] = True; solve_pending()   # нагрузка
     T, t = p.T_max, 0.0
     q = p.rate / 60.0                                   # °C/с
     fac_halo = 1.0
@@ -532,7 +564,10 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         # (результат побитно тот же, без полудюжины временных полей)
         lnc = np.maximum(c, 1e-6)
         np.log(lnc, out=lnc)
-        lnc += lnc_gorsky
+        if p.gorsky == "cons":
+            lnc += (p.V_H * 1e6 / (8.314 * Tk) * fac) * sh_app
+        else:
+            lnc += lnc_gorsky
         Delta = lnc - np.log(c_line(T, L["TSSP"]))
         Delta *= N_H_MPa_per_K * Tk
         Delta += p.Delta0
@@ -670,4 +705,4 @@ def run_kinetic(p: KParams, verbose=False, callback=None):
         plates = [q_ for q_ in plates if q_["init"] or q_["half"] >= 0.5 * p.dx]
     return dict(params=p, plates=plates, hyd=hyd, grains=grains, gpsi=gpsi, S=(S11, S22, S12, S33),
                 c=c, hist={k: np.array(v) for k, v in hist.items()},
-                **(dict(p_plast=pm.p, plast_its=list(pm.its)) if p.plast else {}))
+                walls=nwall, **(dict(p_plast=pm.p, Ep_plast=pm.Ep, plast_its=list(pm.its)) if p.plast else {}))
