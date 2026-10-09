@@ -4,6 +4,7 @@ python bench_report.py bias  папка                 — порог σ* от 
 python bench_report.py noise папка                 — шум мер (среднее ± разброс по затравкам), поле 160 и 240 мкм
 python bench_report.py knock папка папка_шума      — вклад механизма при всех прочих: выключенный − номинал (те же затравки)
 python bench_report.py lhs   папка                 — суррогат (гауссов процесс) и индексы Соболя S1, ST по каждой мере
+python bench_report.py etch  папка                 — этап 1: утолщение травлением по площади до опыта, F_l до опыта
 """
 import glob
 import json
@@ -169,6 +170,25 @@ def rep_lhs(folder):
     json.dump(out, open(os.path.join(folder, "sobol.json"), "w"), indent=1, ensure_ascii=False)
 
 
+def rep_etch(folder, target=0.115, grid=(0.0, 1.0, 2.0, 3.0, 4.0, 5.0)):
+    """Этап 1: утолщение травлением по доле площади до опыта (снимки колец до опыта: 11–12 %), затем F_l до опыта
+    тем же оператором (опыт: 0.097–0.125) — проверка без новой подгонки."""
+    import rhc_model as RM
+    from observe import fl_objects
+    fields = []
+    for f in sorted(glob.glob(os.path.join(folder, "*.npz"))):
+        z = np.load(f)
+        fields.append((np.asarray(z["before"], float), float(z["dx"])))
+    areas = [np.mean([RM.optical(h, dx, e).mean() for h, dx in fields]) for e in grid]
+    e_fit = float(np.interp(target, areas, grid))
+    print("доля площади до опыта от утолщения: " + ", ".join(f"{e:g} мкм → {a:.3f}" for e, a in zip(grid, areas)))
+    print(f"утолщение под {target:.3f}: {e_fit:.2f} мкм")
+    fl = [fl_objects(RM.optical(h, dx, e_fit), RM.UM)["F_l"] for h, dx in fields]
+    print(f"F_l до опыта при этом утолщении: {np.nanmean(fl):.3f} ± {np.nanstd(fl, ddof=1):.3f} (опыт 0.097–0.125); "
+          f"по полям: {', '.join(f'{v:.2f}' for v in fl)}")
+    return e_fit
+
+
 if __name__ == "__main__":
     mode = sys.argv[1]
     if mode == "bias":
@@ -179,3 +199,5 @@ if __name__ == "__main__":
         rep_knock(sys.argv[2], sys.argv[3])
     elif mode == "lhs":
         rep_lhs(sys.argv[2])
+    elif mode == "etch":
+        rep_etch(sys.argv[2])

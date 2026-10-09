@@ -9,6 +9,9 @@ python bench.py папка режим [процессов]
   noise  — шум: номинальная точка, 8 затравок, поле 160 и 240 мкм
   knock  — выключение по одному из полной модели (диагностика вклада при всех прочих), 6 затравок
   lhs    — глобальный план (латинский гиперкуб) по неопределённым параметрам: полные индексы Соболя по суррогату
+  grad   — С2: полоса 430 × 120 мкм с поверхностями, профиль +80 → −20 МПа (участки 0° колец)
+  hyd    — С4: водород 160 / 300 / 450 ppm при 60 и 120 МПа
+  tube   — трубы под давлением: двухосно (σz = σθ/2), σ ∝ T, 0.5 °C/мин
 Номинальная фора — E635_BIAS (после режима bias).
 """
 import json
@@ -48,7 +51,7 @@ FACTORS = [("bias_dT", 0.0, 10.0, "lin"), ("app_dT", 0.06, 0.10, "lin"), ("Delta
 
 def params_of(kw):
     kw = dict(kw)
-    for k in ("mem_keep", "wang", "grain", "sigmas", "tag", "memory"):
+    for k in ("mem_keep", "wang", "grain", "sigmas", "tag", "memory", "loads"):
         kw.pop(k, None)
     return kw
 
@@ -60,7 +63,7 @@ def point(a):
         return
     t0 = time.time()
     base = dict(NOM)
-    base.update({k: v for k, v in kw.items() if k in NOM or k in ("seed", "sigma_prof", "sz_ratio", "walls_um", "v_h_over_rt")})
+    base.update({k: v for k, v in kw.items() if k in NOM or k in ("seed", "sz_ratio", "walls_um", "v_h_over_rt", "sigma_T0")})
     if "grain" in kw:
         base["grain_um"] = (kw["grain"], kw["grain"])
     if kw.get("wang", 0) >= 0.5:
@@ -72,11 +75,12 @@ def point(a):
     if keep < 1.0 and "Ep_plast" in r1:              # возврат при выдержке: часть ε_p и упрочнения снимается
         r1["Ep_plast"] = [a * keep for a in r1["Ep_plast"]]; r1["p_plast"] = r1["p_plast"] * keep
     store = {"before": np.asarray(r1["hyd"], np.float16)}
-    for s in kw.get("sigmas", SIG):
-        ps = KParams(**dict(params_of(base), sigma_app=float(s)))
+    loads = kw.get("loads") or [(f"s{s:g}", dict(sigma_app=float(s))) for s in kw.get("sigmas", SIG)]
+    for label, ld in loads:
+        ps = KParams(**dict(params_of(base), **ld))
         _, r2 = run_history(ps, stage1=r1, memory=kw.get("memory", True))
-        res[f"s{s:g}"] = observe(r2)
-        store[f"s{s:g}"] = np.asarray(r2["hyd"], np.float16)
+        res[label] = observe(r2)
+        store[label] = np.asarray(r2["hyd"], np.float16)
     res["time_s"] = time.time() - t0
     np.savez_compressed(os.path.join(out, tag + ".npz"), dx=p.dx, **store)
     json.dump(res, open(fn, "w"), default=float)
@@ -100,6 +104,16 @@ def cases(mode):
               "no_plast": dict(plast=False), "no_interact": dict(kappa=0.0), "wang": dict(wang=1.0),
               "sharp_nuc": dict(Delta0=15.0, tssp_ref=False)}
         return [(f"{name}_seed{s}", dict(kw, seed=s)) for name, kw in ko.items() for s in range(1, 7)]
+    if mode == "grad":     # С2: полоса в половину стенки с поверхностями, профиль как у участков 0° (+80 → −20 МПа)
+        return [(f"grad_seed{s}", dict(seed=s, size_um=(430.0, 120.0), walls_um=5.0,
+                                       loads=[("prof", dict(sigma_prof=((0.0, 80.0), (1.0, -20.0))))])) for s in range(1, 5)]
+    if mode == "hyd":      # С4: водород сверх TSSD(400 °C) — нерастворившиеся гидриды и полка F_l
+        return [(f"H{h:g}_seed{s}", dict(seed=s, H_ppm=float(h), sigmas=(60.0, 120.0)))
+                for h in (160, 300, 450) for s in range(1, 4)]
+    if mode == "tube":     # трубы под давлением (рис. 4, 6): двухосно, напряжение спадает ∝ T, 0.5 °C/мин
+        return [(f"tube_H{h:g}_seed{s}", dict(seed=s, H_ppm=float(h), rate=0.5, sz_ratio=0.5, sigma_T0=400.0,
+                                              sigmas=(0.0, 50.0, 70.0, 90.0, 110.0, 140.0)))
+                for h in (160, 300, 450) for s in range(1, 3)]
     if mode == "lhs":
         n = int(os.environ.get("LHS_N", "200"))
         U = lhs(n, len(FACTORS), np.random.default_rng(2026))
