@@ -6,6 +6,7 @@ python bench_report.py knock папка папка_шума      — вклад 
 python bench_report.py lhs   папка                 — суррогат (гауссов процесс) и индексы Соболя S1, ST по каждой мере
 python bench_report.py etch  папка                 — этап 1: утолщение травлением по площади до опыта, F_l до опыта
 python bench_report.py remeasure папка [...]       — пересъёмка мер по снимку из сохранённых полей (observe.ETCH_UM)
+python bench_report.py calib папка                 — фора как функция остальных факторов, откалиброванные прогнозы и их полоса
 """
 import glob
 import json
@@ -183,6 +184,7 @@ def rep_lhs(folder):
     targets[f"L_plate@{s0[-2]:g}"] = lambda r: r[f"s{s0[-2]:g}"]["L_plate_mean"]
     problem = dict(num_vars=len(names), names=names, bounds=[[0, 1]] * len(names))
     Xs = saltelli.sample(problem, 2048, calc_second_order=False)
+    Xs[:, names.index("wang")] = np.round(Xs[:, names.index("wang")])      # правило — да/нет, не промежуточное
     out = {}
     print(f"точек плана: {len(rows)}; факторы: {', '.join(names)}")
     for tname, fn in targets.items():
@@ -205,6 +207,81 @@ def rep_lhs(folder):
         print(f"{tname:14s} Q²={q2:.2f} шум={noise:.2f} | " + ", ".join(
             f"{n} ST {Si['ST'][names.index(n)]:.2f} (S1 {Si['S1'][names.index(n)]:.2f})" for n in top))
     json.dump(out, open(os.path.join(folder, "sobol.json"), "w"), indent=1, ensure_ascii=False)
+
+
+def _gp_fit(X, y):
+    from sklearn.gaussian_process import GaussianProcessRegressor
+    from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
+    ok = np.isfinite(y)
+    mu, sd = y[ok].mean(), y[ok].std() + 1e-12
+    kern = ConstantKernel(1.0) * RBF(length_scale=np.ones(X.shape[1]), length_scale_bounds=(0.05, 50.0)) + WhiteKernel(0.1)
+    gp = GaussianProcessRegressor(kern, n_restarts_optimizer=2, random_state=0).fit(X[ok], (y[ok] - mu) / sd)
+    return lambda Z: gp.predict(Z) * sd + mu
+
+
+def rep_calib(folder, level=LEVEL, s_target=45.0, n_mc=3000):
+    """Фора как функция остальных неопределённых факторов: по суррогатам F_l(σ) для каждого набора факторов ищется
+    фора, при которой кривая проходит уровень level при s_target (порог колец). Затем откалиброванные прогнозы
+    (до опыта, F_l(σ), RHCF) — их полоса от неопределённости остальных факторов и доли (первого порядка, по
+    корреляционному отношению) от каждого фактора."""
+    from bench import FACTORS
+    rows = load(folder, "lhs")
+    names = [f[0] for f in FACTORS]
+    ib = names.index("bias_dT")
+
+    def unit(r):
+        return [np.log(r[n] / lo) / np.log(hi / lo) if sc == "log" else (r[n] - lo) / (hi - lo) for n, lo, hi, sc in FACTORS]
+    X = np.array([unit(r) for r in rows])
+    s0 = sigmas(rows[0])
+    gps = {v: _gp_fit(X, np.array([r[f"s{v:g}"]["F_l"] for r in rows], float)) for v in s0}
+    g_before = _gp_fit(X, np.array([r["before"]["F_l"] for r in rows], float))
+    g_rhcf = _gp_fit(X, np.array([r[f"s{s0[-2]:g}"]["RHCF"] for r in rows], float))
+    rng = np.random.default_rng(1)
+    Z = rng.random((n_mc, len(names)))
+    iw = names.index("wang"); Z[:, iw] = np.round(Z[:, iw])
+    ub = np.linspace(0, 1, 26)
+    # F_l(σ = s_target) для каждой точки и каждой форы: линейно между соседними σ сетки
+    i1 = np.searchsorted(s0, s_target); sa, sb = s0[i1 - 1], s0[i1]
+    w = (s_target - sa) / (sb - sa)
+    Zb = np.repeat(Z, len(ub), 0); Zb[:, ib] = np.tile(ub, n_mc)
+    F_t = ((1 - w) * gps[sa](Zb) + w * gps[sb](Zb)).reshape(n_mc, len(ub))
+    bias = np.full(n_mc, np.nan)
+    for k in range(n_mc):                     # фора, при которой F_l(45 МПа) = level: первый переход сверху вниз
+        d = F_t[k] - level
+        j = np.where((d[:-1] >= 0) & (d[1:] < 0))[0]
+        if len(j):
+            j = j[0]; bias[k] = ub[j] + d[j] / (d[j] - d[j + 1]) * (ub[1] - ub[0])
+    ok = np.isfinite(bias)
+    lo, hi = FACTORS[ib][1], FACTORS[ib][2]
+    print(f"F_l({s_target:g} МПа) выше уровня при любой форе: {(F_t.min(1) >= level).mean() * 100:.0f} % наборов, "
+          f"ниже при любой: {(F_t.max(1) < level).mean() * 100:.0f} %")
+    if ok.sum() < 20:
+        print("форы под порог почти не находится — суррогату мало точек или уровень вне досягаемости")
+        return
+    print(f"фора под порог {s_target:g} МПа (F_l = {level}): найдена в {ok.mean() * 100:.0f} % наборов; "
+          f"{lo + (hi - lo) * np.nanmedian(bias):.1f} °C (5–95 %: {lo + (hi - lo) * np.nanpercentile(bias, 5):.1f}–"
+          f"{lo + (hi - lo) * np.nanpercentile(bias, 95):.1f})")
+    Zc = Z[ok].copy(); Zc[:, ib] = bias[ok]
+    preds = {"до опыта": g_before(Zc)}
+    for v in s0:
+        preds[f"F_l {v:g} МПа"] = gps[v](Zc)
+    preds[f"RHCF {s0[-2]:g} МПа"] = g_rhcf(Zc)
+    preds["фора"] = lo + (hi - lo) * bias[ok]
+    others = [n for n in names if n != "bias_dT"]
+    out = {}
+    for key, y in preds.items():
+        # доля дисперсии от каждого фактора (корреляционное отношение по 10 бинам)
+        eta = {}
+        for n in others:
+            xb = np.minimum((Zc[:, names.index(n)] * 10).astype(int), 9)
+            m = np.array([y[xb == b].mean() if (xb == b).any() else y.mean() for b in range(10)])
+            cnt = np.bincount(xb, minlength=10)
+            eta[n] = float((cnt * (m - y.mean()) ** 2).sum() / max(((y - y.mean()) ** 2).sum(), 1e-12))
+        top = sorted(eta, key=lambda n: -eta[n])[:4]
+        out[key] = dict(median=float(np.median(y)), p5=float(np.percentile(y, 5)), p95=float(np.percentile(y, 95)), share=eta)
+        print(f"  {key:12s} {np.median(y):.2f} (5–95 %: {np.percentile(y, 5):.2f}–{np.percentile(y, 95):.2f}) | "
+              + ", ".join(f"{n} {eta[n]:.2f}" for n in top))
+    json.dump(out, open(os.path.join(folder, "calib.json"), "w"), indent=1, ensure_ascii=False)
 
 
 def rep_etch(folder, target=0.115, grid=(0.0, 1.0, 2.0, 3.0, 4.0, 5.0)):
@@ -238,6 +315,8 @@ if __name__ == "__main__":
         rep_lhs(sys.argv[2])
     elif mode == "etch":
         rep_etch(sys.argv[2])
+    elif mode == "calib":
+        rep_calib(sys.argv[2])
     elif mode == "remeasure":
         for d in sys.argv[2:]:
             remeasure(d)
