@@ -10,6 +10,7 @@ python bench.py папка режим [процессов]
   knock  — выключение по одному из полной модели (диагностика вклада при всех прочих), 6 затравок
   lhs    — глобальный план (латинский гиперкуб) по неопределённым параметрам: полные индексы Соболя по суррогату
   lhs2   — второй круг: поле 240 мкм, 12 факторов (κ 1–4, разброс 1–4 °C), нагрузки 70 и 140 МПа, морфология
+  lhs3   — третий круг: толщина пластинки + 6 главных факторов, по 2 затравки на точку
   grad   — С2: полоса 430 × 120 мкм с поверхностями, профиль +80 → −20 МПа (участки 0° колец)
   hyd    — С4: водород 160 / 300 / 450 ppm при 60 и 120 МПа
   tube   — трубы под давлением: двухосно (σz = σθ/2), σ ∝ T, 0.5 °C/мин (tube4 — ещё 2 затравки)
@@ -60,9 +61,16 @@ FACTORS2 = [("bias_dT", 2.0, 8.0, "lin"), ("app_dT", 0.06, 0.10, "lin"), ("Delta
             ("L_max", 4.0, 12.0, "lin"), ("cross_tol", 0.0, 30.0, "lin"), ("mem_keep", 0.0, 1.0, "lin")]
 
 
+# третий круг: толщина пластинки — новый фактор (0.3 мкм вместо 0.6 даёт густоту линий как в опыте, visual/dense);
+# 7 факторов, по 2 затравки на точку (морфология на поле 240 мкм шумная); прочее — на номинале по первым кругам
+FACTORS3 = [("h_um", 0.2, 0.6, "lin"), ("kappa", 1.3, 3.5, "log"), ("dT_s", 1.0, 3.5, "lin"), ("gb_dT", 1.0, 3.5, "lin"),
+            ("Delta0", 300.0, 800.0, "log"), ("grain", 4.0, 8.0, "lin"), ("bias_dT", 3.0, 8.0, "lin")]
+FIX3 = dict(app_dT=0.08, k_tip=0.05, L_max=8.0, cross_tol=17.0, plast_sy=230.0, mem_keep=0.6)
+
+
 def params_of(kw):
     kw = dict(kw)
-    for k in ("mem_keep", "wang", "grain", "sigmas", "tag", "memory", "loads", "factor_set"):
+    for k in ("mem_keep", "wang", "grain", "sigmas", "tag", "memory", "loads", "factor_set", "point"):
         kw.pop(k, None)
     return kw
 
@@ -75,7 +83,7 @@ def point(a):
     t0 = time.time()
     base = dict(NOM)
     base.update({k: v for k, v in kw.items() if k in NOM or k in ("seed", "sz_ratio", "walls_um", "v_h_over_rt", "sigma_T0",
-                                                                  "chi0_profile")})
+                                                                  "chi0_profile", "h_um")})
     if "grain" in kw:
         base["grain_um"] = (kw["grain"], kw["grain"])
     if kw.get("wang", 0) >= 0.5:
@@ -149,6 +157,17 @@ def cases(mode):
                    sz_ratio=0.5, sigma_T0=400.0, size_um=(860.0, 360.0), walls_um=5.0, chi0_profile=(38.3, 38.7, 32.8),
                    seed=int(os.environ.get("VIS_SEED", "1")))
         return [("tubevis_a", dict(est, sigmas=(0.0, 70.0))), ("tubevis_b", dict(est, sigmas=(140.0,)))]
+    if mode == "lhs3":
+        n = int(os.environ.get("LHS_N", "60"))
+        U = lhs(n, len(FACTORS3), np.random.default_rng(2028))
+        out = []
+        for i, u in enumerate(U):
+            kw = dict(FIX3, size_um=(240.0, 240.0), sigmas=(70.0, 140.0), factor_set="FACTORS3")
+            for (name, lo, hi, sc), x in zip(FACTORS3, u):
+                kw[name] = float(lo * (hi / lo) ** x) if sc == "log" else float(lo + (hi - lo) * x)
+            for rep in (0, 1):
+                out.append((f"lhs3_{i:03d}_r{rep}", dict(kw, seed=5000 + i + 1000 * rep, point=i)))
+        return out
     if mode == "lhs2":
         n = int(os.environ.get("LHS_N", "100"))
         U = lhs(n, len(FACTORS2), np.random.default_rng(2027))
