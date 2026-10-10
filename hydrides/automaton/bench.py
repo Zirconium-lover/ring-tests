@@ -11,6 +11,7 @@ python bench.py папка режим [процессов]
   lhs    — глобальный план (латинский гиперкуб) по неопределённым параметрам: полные индексы Соболя по суррогату
   lhs2   — второй круг: поле 240 мкм, 12 факторов (κ 1–4, разброс 1–4 °C), нагрузки 70 и 140 МПа, морфология
   lhs3   — третий круг: толщина пластинки + 6 главных факторов, по 2 затравки на точку
+  s1probe — исходная структура: охлаждение при наводороживании (0.75–8 °C/мин) × разброс текстуры χ_s
   grad   — С2: полоса 430 × 120 мкм с поверхностями, профиль +80 → −20 МПа (участки 0° колец)
   hyd    — С4: водород 160 / 300 / 450 ppm при 60 и 120 МПа
   tube   — трубы под давлением: двухосно (σz = σθ/2), σ ∝ T, 0.5 °C/мин (tube4 — ещё 2 затравки)
@@ -70,7 +71,7 @@ FIX3 = dict(app_dT=0.08, k_tip=0.05, L_max=8.0, cross_tol=17.0, plast_sy=230.0, 
 
 def params_of(kw):
     kw = dict(kw)
-    for k in ("mem_keep", "wang", "grain", "sigmas", "tag", "memory", "loads", "factor_set", "point"):
+    for k in ("mem_keep", "wang", "grain", "sigmas", "tag", "memory", "loads", "factor_set", "point", "rate1"):
         kw.pop(k, None)
     return kw
 
@@ -89,7 +90,7 @@ def point(a):
     if kw.get("wang", 0) >= 0.5:
         base["gb_rule"] = "wang"
     p = KParams(**params_of(base))
-    r1 = run_kinetic(stage1_params(p))
+    r1 = run_kinetic(stage1_params(p, kw.get("rate1")))      # rate1 — охлаждение при наводороживании (иначе как в опыте)
     res = dict(kw, tag=tag, before=observe(r1))
     keep = float(kw.get("mem_keep", 1.0))
     if keep < 1.0 and "Ep_plast" in r1:              # возврат при выдержке: часть ε_p и упрочнения снимается
@@ -157,6 +158,12 @@ def cases(mode):
                    sz_ratio=0.5, sigma_T0=400.0, size_um=(860.0, 360.0), walls_um=5.0, chi0_profile=(38.3, 38.7, 32.8),
                    seed=int(os.environ.get("VIS_SEED", "1")))
         return [("tubevis_a", dict(est, sigmas=(0.0, 70.0))), ("tubevis_b", dict(est, sigmas=(140.0,)))]
+    if mode == "s1probe":  # исходная структура: охлаждение при наводороживании × разброс текстуры (прямизна и густота линий)
+        pts = {"p22": dict(h_um=0.434, kappa=1.34, dT_s=2.05, gb_dT=1.09, Delta0=377.0, grain=6.08, bias_dT=6.26),
+               "p12": dict(h_um=0.318, kappa=1.93, dT_s=2.59, gb_dT=2.8, Delta0=598.0, grain=7.21, bias_dT=5.45)}
+        return [(f"s1_{pn}_r{r1:g}_chi{cs:g}_s{sd}", dict(FIX3, **pv, rate1=float(r1), chi_s=float(cs), size_um=(240.0, 240.0),
+                                                          sigmas=(), seed=7000 + sd))
+                for pn, pv in pts.items() for r1 in (0.75, 2.5, 8.0) for cs in (16.0, 26.0, 36.0) for sd in (0, 1)]
     if mode == "lhs3":
         n = int(os.environ.get("LHS_N", "60"))
         U = lhs(n, len(FACTORS3), np.random.default_rng(2028))
