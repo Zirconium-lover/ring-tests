@@ -3,7 +3,11 @@
   skel_density — плотность длины скелета, мм/мм²;
   L_obj_w, L_obj_max — средняя по длине и наибольшая длина связного макрогидрида (по главной оси), мкм;
   L_seg_w — средняя по длине длина отрезка скелета между ветвлениями, мкм;
-  spacing_r — среднее расстояние между гидридами вдоль радиуса (столбцы маски), мкм.
+  spacing_r — среднее расстояние между гидридами вдоль радиуса (столбцы маски), мкм;
+  small_density, small_frac — мелкие гидриды (короче 15 мкм): число на мм² и доля в длине;
+  iso_density, iso_frac — «рой»: мелкие гидриды дальше 10 мкм от длинных (≥ 30 мкм) — число на мм² и доля мелких;
+  ang_w, F20, Fn_seg — угол отрезков скелета к окружному направлению: средний по длине (°), доля длины ближе 20° и
+  дальше 45° (Fn по маске 3.5 мкм/пикс — грубее Fn_lab, но тем же конвейером на снимке и на модели).
 Опыт, кольца Э635 до и после (рис. 3 Плясова): L_obj_w 55–78, L_obj_max 175–311, L_seg_w 47–68, skel_density 10–18,
 spacing_r 66–150. При κ = 1 модель: 23–31 / 50–66 — россыпь коротких гидридов."""
 import os
@@ -16,7 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE); sys.path.insert(0, os.path.dirname(HERE))
 
 
-def morph(m, um):
+def morph(m, um, L_small=15.0, d_iso=10.0):
     from skimage.morphology import skeletonize
     m = np.asarray(m, bool)
     sk = skeletonize(m)
@@ -26,7 +30,7 @@ def morph(m, um):
 
     def lens(mask):
         lab, n = ndi.label(mask, structure=np.ones((3, 3)))
-        L = []
+        L, ids, ang = [], [], []
         for k, sl in enumerate(ndi.find_objects(lab), 1):
             if sl is None:
                 continue
@@ -35,14 +39,28 @@ def morph(m, um):
                 continue
             P = np.stack([ys, xs], 1).astype(float); P -= P.mean(0)
             _, v = np.linalg.eigh(P.T @ P); pr = P @ v[:, -1]
-            L.append((pr.max() - pr.min() + 1) * um)
-        return np.array(L)
-    Lo = lens(m); Ls = lens(seg)
+            L.append((pr.max() - pr.min() + 1) * um); ids.append(k)
+            ang.append(np.degrees(np.arctan2(abs(v[0, -1]), abs(v[1, -1]))))   # к окружному направлению (столбцы)
+        return np.array(L), lab, np.array(ids, int), np.array(ang)
+    Lo, lab, ids, _ = lens(m); Ls, _, _, As = lens(seg)
     cross = (np.diff(m.astype(int), axis=0) == 1).sum()
+    # «рой»: мелкие гидриды (короче L_small) — их число на мм² и доля в суммарной длине объектов (средняя по длине их
+    # почти не видит); обособленные — дальше d_iso от длинных (≥ 2 L_small): в опыте мелкие куски лежат на линиях
+    # (рваная линия), в россыпи — в матрице между линиями
+    small = Lo < L_small if len(Lo) else np.zeros(0, bool)
+    big = np.isin(lab, ids[Lo >= 2 * L_small]) if len(Lo) else np.zeros_like(m)
+    dist = ndi.distance_transform_edt(~big) * um if big.any() else np.full(m.shape, np.inf)
+    dmin = ndi.minimum(dist, lab, ids[small]) if small.any() else np.zeros(0)
+    n_iso = int((np.atleast_1d(dmin) > d_iso).sum())
     return dict(area=float(m.mean()), skel_density=float(sk.sum() * um / A * 1000),
+                small_density=float(small.sum() / A * 1e6), small_frac=float(Lo[small].sum() / Lo.sum()) if len(Lo) else np.nan,
+                iso_density=float(n_iso / A * 1e6), iso_frac=float(n_iso / small.sum()) if small.any() else np.nan,
                 L_obj_w=float((Lo ** 2).sum() / Lo.sum()) if len(Lo) else np.nan,
                 L_obj_max=float(Lo.max()) if len(Lo) else np.nan,
                 L_seg_w=float((Ls ** 2).sum() / Ls.sum()) if len(Ls) else np.nan,
+                ang_w=float((Ls * As).sum() / Ls.sum()) if len(Ls) else np.nan,
+                F20=float(Ls[As <= 20].sum() / Ls.sum()) if len(Ls) else np.nan,
+                Fn_seg=float(Ls[As > 45].sum() / Ls.sum()) if len(Ls) else np.nan,
                 spacing_r=float(m.shape[0] * m.shape[1] * um / max(cross, 1)))
 
 

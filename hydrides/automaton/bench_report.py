@@ -403,7 +403,7 @@ def rep_lhs2(folder):
                   + ", ".join(f"{n} {Si['ST'][names.index(n)]:.2f}/{Si['S1'][names.index(n)]:.2f}" for n in top), flush=True)
     json.dump(out, open(os.path.join(folder, "sobol2.json"), "w"), indent=1, ensure_ascii=False)
 
-KEYS3 = ("Fn_lab", "M_L_obj_w", "M_L_seg_w", "M_spacing_r", "M_skel_density", "area", "n_plates")
+KEYS3 = ("Fn_lab", "M_L_obj_w", "M_L_seg_w", "M_spacing_r", "M_skel_density", "M_F20", "M_ang_w", "M_small_density", "area", "n_plates")
 
 
 def rep_lhs3(folder, targets=None, cut=3.0, n=200000, q2_min=0.2):
