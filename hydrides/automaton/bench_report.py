@@ -8,7 +8,9 @@ python bench_report.py etch  папка                 — этап 1: утол
 python bench_report.py remeasure папка [...]       — пересъёмка мер по снимку из сохранённых полей (observe.ETCH_UM)
 python bench_report.py match папка папка_шума      — согласование с данными калибровки (history matching) и прогнозы на нём
 python bench_report.py lhs2  папка                 — второй круг: Соболь по Fn лаборатории и морфологии
-python bench_report.py lhs3  папка [цели.json]     — третий круг: Соболь по средним пар затравок, согласование с целями
+python bench_report.py lhs3  папка [цели.json] [remorph_etch.json] — третий круг: Соболь по средним пар затравок,
+                                                    согласование с целями; с пересъёмкой — утолщение травлением как фактор
+python bench_report.py remorph папка               — пересъёмка морфологии сохранённых полей при утолщении 0.5–2.2 мкм
 python bench_report.py calib папка [папка_шума]    — фора как функция остальных факторов, откалиброванные прогнозы и их полоса
 """
 import glob
@@ -406,7 +408,46 @@ def rep_lhs2(folder):
 KEYS3 = ("Fn_lab", "M_L_obj_w", "M_L_seg_w", "M_spacing_r", "M_skel_density", "M_F20", "M_ang_w", "M_small_density", "area", "n_plates")
 
 
-def rep_lhs3(folder, targets=None, cut=3.0, n=200000, q2_min=0.2):
+def etch_rows(rows, etch_json):
+    """Утолщение травлением — неопределённый параметр оператора съёмки: каждая строка размножается по значениям
+    утолщения из пересъёмки (JSON {метка: {утолщение: {стадия: {M_*: …}}}}, bench_report.py remorph), фактор etch_um."""
+    import copy
+    E = json.load(open(etch_json)); out = []
+    for r in rows:
+        for k, (e, st) in enumerate(sorted(E.get(r["tag"], {}).items(), key=lambda kv: float(kv[0]))):
+            rr = copy.deepcopy(r); rr["etch_um"] = float(e); rr["point"] = int(r["point"]) * 100 + k
+            for stage, v in st.items():
+                if stage in rr:
+                    rr[stage].update(v)
+            out.append(rr)
+    es = sorted({r["etch_um"] for r in out})
+    return out, ("etch_um", es[0], es[-1], "lin")
+
+
+def remorph(folder, etches=(0.5, 1.0, 1.5, 2.2), procs=2):
+    """Пересъёмка морфологии (M_*) сохранённых полей при нескольких утолщениях → remorph_etch.json папки."""
+    from multiprocessing import Pool
+    fn = os.path.join(folder, "remorph_etch.json")
+    done = json.load(open(fn)) if os.path.exists(fn) else {}
+    todo = [(f, etches) for f in sorted(glob.glob(os.path.join(folder, "*.npz")))
+            if os.path.basename(f)[:-4] not in done and os.path.exists(f[:-4] + ".json")]
+    with Pool(procs) as pool:
+        for tag, v in pool.imap_unordered(_remorph_one, todo):
+            done[tag] = v
+            json.dump(done, open(fn, "w"), default=float)
+    print(f"пересъёмка морфологии {folder}: {len(todo)} полей, утолщения {etches}")
+
+
+def _remorph_one(a):
+    f, etches = a
+    from morph import morph_model
+    z = np.load(f); dx = float(z["dx"])
+    st = [k for k in z.files if k != "dx" and not k.startswith("P_")]
+    return os.path.basename(f)[:-4], {f"{e:g}": {k: {"M_" + m: v for m, v in morph_model(np.asarray(z[k], float), dx, e).items()}
+                                                 for k in st} for e in etches}
+
+
+def rep_lhs3(folder, targets=None, cut=3.0, n=200000, q2_min=0.2, etch_json=None):
     """Третий круг: мера точки — среднее по двум затравкам; затравочный шум — по парам (σ = √(⟨разность²⟩/2)),
     в суррогат идёт шум среднего пары (σ/√2). Индексы Соболя по суррогату; «потолок» Q² = 1 − шум²/дисперсия —
     сколько разброса вообще можно объяснить факторами. С файлом целей (JSON {"мера@стадия": [значение, ошибка]},
@@ -416,7 +457,10 @@ def rep_lhs3(folder, targets=None, cut=3.0, n=200000, q2_min=0.2):
     from SALib.sample import saltelli
     from SALib.analyze import sobol
     rows = load(folder, "lhs3")
-    FACTORS = factors_of(rows)
+    FACTORS = list(factors_of(rows))
+    if etch_json:                                   # утолщение травлением — ещё один (операторный) фактор
+        rows, fe = etch_rows(rows, etch_json)
+        FACTORS.append(fe)
     names = [f[0] for f in FACTORS]
     by = defaultdict(list)
     for r in rows:
@@ -454,7 +498,8 @@ def rep_lhs3(folder, targets=None, cut=3.0, n=200000, q2_min=0.2):
             print(f"{k:24s} Q²={q2:5.2f} (потолок {ceil:4.2f}) σзатр={sd_seed if sd_seed else np.nan:.3g} | "
                   f"{np.nanpercentile(y, 10):.3g}–{np.nanpercentile(y, 90):.3g} | "
                   + ", ".join(f"{n} {Si['ST'][names.index(n)]:.2f}/{Si['S1'][names.index(n)]:.2f}" for n in top), flush=True)
-    json.dump(out, open(os.path.join(folder, "sobol3.json"), "w"), indent=1, ensure_ascii=False)
+    sfx = "_etch" if etch_json else ""
+    json.dump(out, open(os.path.join(folder, f"sobol3{sfx}.json"), "w"), indent=1, ensure_ascii=False)
     if not targets:
         return
     tg_all = {k: v for k, v in json.load(open(targets)).items() if k in fits}
@@ -498,9 +543,9 @@ def rep_lhs3(folder, targets=None, cut=3.0, n=200000, q2_min=0.2):
     print("точки плана, ближайшие к целям (по расчётам):")
     for j in np.argsort(Ip)[:8]:
         r = by[pts[j]][0]
-        res["best_points"].append(dict(point=int(pts[j]), I=float(Ip[j]), **{k: r[k] for k in names}))
-        print(f"  точка {pts[j]:3d}: I={Ip[j]:.2f} | " + ", ".join(f"{k} {r[k]:.3g}" for k in names))
-    json.dump(res, open(os.path.join(folder, "match3.json"), "w"), indent=1, ensure_ascii=False)
+        res["best_points"].append(dict(point=r["tag"][:8], I=float(Ip[j]), **{k: r[k] for k in names}))
+        print(f"  {r['tag'][:8]}: I={Ip[j]:.2f} | " + ", ".join(f"{k} {r[k]:.3g}" for k in names))
+    json.dump(res, open(os.path.join(folder, f"match3{sfx}.json"), "w"), indent=1, ensure_ascii=False)
 
 
 def rep_etch(folder, target=0.115, grid=(0.0, 1.0, 2.0, 3.0, 4.0, 5.0)):
@@ -537,7 +582,9 @@ if __name__ == "__main__":
     elif mode == "lhs2":
         rep_lhs2(sys.argv[2])
     elif mode == "lhs3":
-        rep_lhs3(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None)
+        rep_lhs3(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None, etch_json=sys.argv[4] if len(sys.argv) > 4 else None)
+    elif mode == "remorph":
+        remorph(sys.argv[2])
     elif mode == "calib":
         rep_calib(sys.argv[2], noise_folder=sys.argv[3] if len(sys.argv) > 3 else None)
     elif mode == "match":
