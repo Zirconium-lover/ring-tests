@@ -8,6 +8,7 @@ python bench_report.py etch  папка                 — этап 1: утол
 python bench_report.py remeasure папка [...]       — пересъёмка мер по снимку из сохранённых полей (observe.ETCH_UM)
 python bench_report.py match папка папка_шума      — согласование с данными калибровки (history matching) и прогнозы на нём
 python bench_report.py lhs2  папка                 — второй круг: Соболь по Fn лаборатории и морфологии
+python bench_report.py lhs3  папка [цели.json]     — третий круг: Соболь по средним пар затравок, согласование с целями
 python bench_report.py calib папка [папка_шума]    — фора как функция остальных факторов, откалиброванные прогнозы и их полоса
 """
 import glob
@@ -402,6 +403,105 @@ def rep_lhs2(folder):
                   + ", ".join(f"{n} {Si['ST'][names.index(n)]:.2f}/{Si['S1'][names.index(n)]:.2f}" for n in top), flush=True)
     json.dump(out, open(os.path.join(folder, "sobol2.json"), "w"), indent=1, ensure_ascii=False)
 
+KEYS3 = ("Fn_lab", "M_L_obj_w", "M_L_seg_w", "M_spacing_r", "M_skel_density", "area", "n_plates")
+
+
+def rep_lhs3(folder, targets=None, cut=3.0, n=200000, q2_min=0.2):
+    """Третий круг: мера точки — среднее по двум затравкам; затравочный шум — по парам (σ = √(⟨разность²⟩/2)),
+    в суррогат идёт шум среднего пары (σ/√2). Индексы Соболя по суррогату; «потолок» Q² = 1 − шум²/дисперсия —
+    сколько разброса вообще можно объяснить факторами. С файлом целей (JSON {"мера@стадия": [значение, ошибка]},
+    ошибка — разброс снимков опыта и расхождение модели) — согласование (history matching): доля пространства
+    факторов с неправдоподобием < cut, сужение факторов, прогнозы на согласованной области и точки плана,
+    ближайшие к опыту по самим расчётам (для наглядной проверки)."""
+    from SALib.sample import saltelli
+    from SALib.analyze import sobol
+    rows = load(folder, "lhs3")
+    FACTORS = factors_of(rows)
+    names = [f[0] for f in FACTORS]
+    by = defaultdict(list)
+    for r in rows:
+        by[r["point"]].append(r)
+    pts = sorted(by)
+
+    def unit(r):
+        return [np.log(r[k] / lo) / np.log(hi / lo) if sc == "log" else (r[k] - lo) / (hi - lo) for k, lo, hi, sc in FACTORS]
+    X = np.array([unit(by[i][0]) for i in pts])
+    stages = ["before"] + [k for k in rows[0] if k.startswith("s") and k[1:].replace(".", "").isdigit()]
+    problem = dict(num_vars=len(names), names=names, bounds=[[0, 1]] * len(names))
+    Xs = saltelli.sample(problem, 2048, calc_second_order=False)
+    fits, out = {}, {}
+    print(f"точек: {len(pts)} (расчётов {len(rows)}); факторы: {', '.join(names)}")
+    for stage in stages:
+        for key in KEYS3:
+            Y = np.array([[r[stage].get(key, np.nan) if stage in r else np.nan for r in by[i]][:2]
+                          + [np.nan] * (2 - min(len(by[i]), 2)) for i in pts], float)
+            ok = np.isfinite(Y).any(1)
+            if ok.sum() < 15:
+                continue
+            y = np.full(len(pts), np.nan); y[ok] = np.nanmean(Y[ok], 1)
+            both = np.isfinite(Y).all(1)
+            sd_seed = float(np.sqrt(np.mean((Y[both, 0] - Y[both, 1]) ** 2) / 2)) if both.sum() > 3 else None
+            nsd = sd_seed / np.sqrt(2) if sd_seed else None
+            f, q2, gp, nz = _gp_fit(X, y, nsd, cv=True)
+            Si = sobol.analyze(problem, f(Xs), calc_second_order=False, print_to_console=False)
+            ceil = float(1 - nsd ** 2 / np.nanvar(y)) if nsd else np.nan
+            k = f"{key}@{stage}"
+            fits[k] = (gp, nz, float(np.nanmean(y)), float(np.nanstd(y)), y, sd_seed)
+            out[k] = dict(Q2=q2, Q2_ceil=ceil, seed_sd=sd_seed, mean=float(np.nanmean(y)),
+                          p10=float(np.nanpercentile(y, 10)), p90=float(np.nanpercentile(y, 90)),
+                          ST=dict(zip(names, map(float, Si["ST"]))), S1=dict(zip(names, map(float, Si["S1"]))))
+            top = sorted(names, key=lambda n: -Si["ST"][names.index(n)])[:4]
+            print(f"{k:24s} Q²={q2:5.2f} (потолок {ceil:4.2f}) σзатр={sd_seed if sd_seed else np.nan:.3g} | "
+                  f"{np.nanpercentile(y, 10):.3g}–{np.nanpercentile(y, 90):.3g} | "
+                  + ", ".join(f"{n} {Si['ST'][names.index(n)]:.2f}/{Si['S1'][names.index(n)]:.2f}" for n in top), flush=True)
+    json.dump(out, open(os.path.join(folder, "sobol3.json"), "w"), indent=1, ensure_ascii=False)
+    if not targets:
+        return
+    tg_all = {k: v for k, v in json.load(open(targets)).items() if k in fits}
+    # цель, которую суррогат не предсказывает (Q² < q2_min), в согласование по суррогату не идёт: плоский суррогат
+    # с малой ошибкой дал бы ложное сужение; по самим точкам плана она учитывается всегда
+    tg = {k: v for k, v in tg_all.items() if (out[k]["Q2"] or 0) >= q2_min}
+    print(f"\nсогласование по {len(tg)} целям: " + ", ".join(f"{k} {v[0]:.3g}±{v[1]:.2g}" for k, v in tg.items())
+          + ("; без суррогата (Q² < %.1f): " % q2_min + ", ".join(sorted(set(tg_all) - set(tg))) if len(tg) < len(tg_all) else ""))
+
+    def pred(k, Z):
+        gp, nz, mu, sd = fits[k][:4]
+        m, s = gp.predict(Z, return_std=True)
+        return m * sd + mu, np.sqrt(np.clip(s ** 2 - nz, 0, None)) * sd     # среднее по затравкам и ошибка суррогата
+    Z = np.random.default_rng(7).random((n, len(names)))
+    I = np.zeros(n); Ik = {}
+    for k, (z, e) in tg.items():
+        m, s = pred(k, Z)
+        Ik[k] = np.abs(m - z) / np.sqrt(e ** 2 + s ** 2)
+        I = np.maximum(I, Ik[k])
+    keep = I < cut
+    print(f"согласовано (неправдоподобие < {cut:g}): {keep.mean() * 100:.1f} % пространства факторов; "
+          "по одной цели: " + ", ".join(f"{k} {(v < cut).mean() * 100:.0f} %" for k, v in Ik.items()))
+    res = dict(frac=float(keep.mean()), targets=tg_all, surrogate_targets=sorted(tg), factors={}, pred={}, best_points=[])
+    if tg and keep.sum() >= 50:
+        print("согласованные наборы (медиана и 5–95 %):")
+        for i, (k, lo, hi, sc) in enumerate(FACTORS):
+            q = np.percentile(Z[keep, i], [5, 50, 95])
+            conv = (lambda u: lo * (hi / lo) ** u) if sc == "log" else (lambda u: lo + (hi - lo) * u)
+            res["factors"][k] = [conv(v) for v in q]
+            print(f"  {k:10s} {conv(q[1]):8.3g} ({conv(q[0]):.3g}–{conv(q[2]):.3g}){'  ← сужен' if q[2] - q[0] < 0.75 else ''}")
+        print("прогнозы на согласованной области (медиана, 5–95 %):")
+        for k in fits:
+            m, _ = pred(k, Z[keep])
+            res["pred"][k] = [float(np.median(m)), float(np.percentile(m, 5)), float(np.percentile(m, 95))]
+            print(f"  {k:24s} {res['pred'][k][0]:.3g} ({res['pred'][k][1]:.3g}–{res['pred'][k][2]:.3g})")
+    # точки плана по самим расчётам: неправдоподобие среднего пары (ошибка — затравочный шум среднего)
+    Ip = np.zeros(len(pts))
+    for k, (z, e) in tg_all.items():
+        y, sdz = fits[k][4], fits[k][5] or 0.0
+        Ip = np.maximum(Ip, np.nan_to_num(np.abs(y - z) / np.sqrt(e ** 2 + sdz ** 2 / 2), nan=99.0))
+    print("точки плана, ближайшие к целям (по расчётам):")
+    for j in np.argsort(Ip)[:8]:
+        r = by[pts[j]][0]
+        res["best_points"].append(dict(point=int(pts[j]), I=float(Ip[j]), **{k: r[k] for k in names}))
+        print(f"  точка {pts[j]:3d}: I={Ip[j]:.2f} | " + ", ".join(f"{k} {r[k]:.3g}" for k in names))
+    json.dump(res, open(os.path.join(folder, "match3.json"), "w"), indent=1, ensure_ascii=False)
+
 
 def rep_etch(folder, target=0.115, grid=(0.0, 1.0, 2.0, 3.0, 4.0, 5.0)):
     """Этап 1: утолщение травлением по доле площади до опыта (снимки колец до опыта: 11–12 %), затем F_l до опыта
@@ -436,6 +536,8 @@ if __name__ == "__main__":
         rep_etch(sys.argv[2])
     elif mode == "lhs2":
         rep_lhs2(sys.argv[2])
+    elif mode == "lhs3":
+        rep_lhs3(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None)
     elif mode == "calib":
         rep_calib(sys.argv[2], noise_folder=sys.argv[3] if len(sys.argv) > 3 else None)
     elif mode == "match":

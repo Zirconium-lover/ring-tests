@@ -66,3 +66,24 @@ def morph_image(path, um_px=3.5):
         warnings.simplefilter("ignore")
         _, D = hs.analyse(path, um=um_px)
     return morph(D["hm"], um_px)
+
+
+def morph_windows(path, win_um=240.0, um_px=3.5):
+    """Морфология снимка опыта в окнах win_um (как поле модели): одна маска на весь снимок, затем окна без перекрытия.
+    → {мера: [среднее по окнам, σ по окнам, число окон]} — цель того же оператора и окна, что у модели, и разброс
+    одного окна (сравнивать с затравочным разбросом модели)."""
+    import hydride_spec as hs
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        _, D = hs.analyse(path, um=um_px)
+    hm = np.asarray(D["hm"], bool); w = int(round(win_um / um_px))
+    rows = [morph(hm[y:y + w, x:x + w], um_px) for y in range(0, hm.shape[0] - w + 1, w) for x in range(0, hm.shape[1] - w + 1, w)]
+    return {k: [float(np.nanmean([r[k] for r in rows])), float(np.nanstd([r[k] for r in rows], ddof=1)), len(rows)]
+            for k in rows[0]}
+
+
+if __name__ == "__main__":       # python morph.py выход.json снимок.png ... — морфология снимков в окнах 240 мкм
+    import json
+    res = {os.path.basename(p).rsplit(".", 1)[0]: morph_windows(p) for p in sys.argv[2:]}
+    json.dump(res, open(sys.argv[1], "w"), indent=1)
