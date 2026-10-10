@@ -63,7 +63,7 @@ def _remeasure_one(a):
     meta = json.load(open(f[:-4] + ".json"))
     z = np.load(f)
     nw = int(round(float(meta.get("walls_um", 0.0)) / float(z["dx"])))
-    v = {k: OB.observe_image(z[k], float(z["dx"]), nw, e) for k in z.files if k != "dx"}
+    v = {k: OB.observe_image(z[k], float(z["dx"]), nw, e) for k in z.files if k != "dx" and not k.startswith("P_")}
     v["etch_um"] = e
     return meta["tag"], v
 

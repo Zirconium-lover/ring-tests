@@ -76,6 +76,11 @@ def params_of(kw):
     return kw
 
 
+def plates_arr(plates):
+    """Список пластинок для рисунка без растра: (y, x центра, мкм; угол ψ от окружного; полудлина, мкм; исходная ли)."""
+    return np.array([(q["c"][0], q["c"][1], q["psi"], q["half"], float(bool(q.get("init")))) for q in plates], np.float32).reshape(-1, 5)
+
+
 def point(a):
     out, tag, kw = a
     fn = os.path.join(out, tag + ".json")
@@ -95,13 +100,13 @@ def point(a):
     keep = float(kw.get("mem_keep", 1.0))
     if keep < 1.0 and "Ep_plast" in r1:              # возврат при выдержке: часть ε_p и упрочнения снимается
         r1["Ep_plast"] = [a * keep for a in r1["Ep_plast"]]; r1["p_plast"] = r1["p_plast"] * keep
-    store = {"before": np.asarray(r1["hyd"], np.float16)}
+    store = {"before": np.asarray(r1["hyd"], np.float16), "P_before": plates_arr(r1["plates"])}
     loads = kw.get("loads") or [(f"s{s:g}", dict(sigma_app=float(s))) for s in kw.get("sigmas", SIG)]
     for label, ld in loads:
         ps = KParams(**dict(params_of(base), **ld))
         _, r2 = run_history(ps, stage1=r1, memory=kw.get("memory", True))
         res[label] = observe(r2)
-        store[label] = np.asarray(r2["hyd"], np.float16)
+        store[label] = np.asarray(r2["hyd"], np.float16); store["P_" + label] = plates_arr(r2["plates"])
     res["time_s"] = time.time() - t0
     np.savez_compressed(os.path.join(out, tag + ".npz"), dx=p.dx, **store)
     json.dump(res, open(fn, "w"), default=float)

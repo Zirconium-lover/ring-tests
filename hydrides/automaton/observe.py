@@ -81,6 +81,42 @@ def fn_skeleton(mask, um, um_px=1.0, min_px=2, bins=18):
     return (Lr / Lt if Lt > 0 else np.nan), (hist / max(Lt, 1e-12)).tolist(), nseg
 
 
+def plate_stats(plates, size_um, gap=2.0, side_um=3.0):
+    """Расположение пластинок модели (без съёмки): контакты — пары пластинок, сблизившиеся ближе gap (по точкам
+    вдоль пластинок, поле периодическое). side_frac — доля контактов «бок о бок» (смещение центров больше по нормали
+    пластинки, чем вдоль неё), остальное — «торец в торец» (продолжение линии); stack_n — сколько соседей в среднем
+    лежит сбоку от пластинки (перекрываются по длине, ближе side_um по нормали) — толщина пачки."""
+    from scipy.spatial import cKDTree
+    P = [(np.array(q["c"], float), float(q["psi"]), float(q["half"])) for q in plates if q["half"] > 0]
+    if len(P) < 2:
+        return dict(side_frac=np.nan, stack_n=np.nan)
+    box = np.array(size_um, float)
+    C = np.array([c for c, _, _ in P]) % box
+    T = np.array([(-np.sin(psi), np.cos(psi)) for _, psi, _ in P])      # (y, x): строки вниз — как plate_eigen
+    N = np.stack([T[:, 1], -T[:, 0]], 1)
+    Hh = np.array([h for _, _, h in P])
+    pts, own = [], []
+    for k, (c, t, h) in enumerate(zip(C, T, Hh)):
+        s = np.linspace(-h, h, max(2, int(2 * h) + 1))
+        pts.append((c + s[:, None] * t) % box); own.append(np.full(len(s), k))
+    pts = np.concatenate(pts); own = np.concatenate(own)
+    tree = cKDTree(pts, boxsize=box)
+    pairs = {(min(own[a], own[b]), max(own[a], own[b])) for a, b in tree.query_pairs(gap) if own[a] != own[b]}
+    side = 0
+    for i, j in pairs:
+        d = C[j] - C[i]; d -= box * np.round(d / box)
+        side += abs(d @ N[i]) > abs(d @ T[i])
+    stack = np.zeros(len(P))
+    ct = cKDTree(C, boxsize=box)
+    for i, nb in enumerate(ct.query_ball_point(C, 2 * Hh.max() + side_um)):
+        for j in nb:
+            if j == i:
+                continue
+            d = C[j] - C[i]; d -= box * np.round(d / box)
+            stack[i] += abs(d @ T[i]) < Hh[i] and abs(d @ N[i]) < side_um
+    return dict(side_frac=float(side / len(pairs)) if pairs else np.nan, stack_n=float(stack.mean()), n_contacts=len(pairs))
+
+
 def observe(res, etch_um=ETCH_UM, um_rhc=3.5, L_min=5.0, spec=True):
     out = observe_image(res["hyd"], res["params"].dx, int(res.get("walls", 0)), etch_um, um_rhc, L_min, spec)
     new = [q for q in res["plates"] if not q.get("init")]
@@ -92,6 +128,8 @@ def observe(res, etch_um=ETCH_UM, um_rhc=3.5, L_min=5.0, spec=True):
                F_plates=float(L[radp].sum() / L.sum()) if len(L) else np.nan,
                T_first=float(new[0]["T"]) if new else np.nan,
                p_plast_mean=float(np.mean(res["p_plast"])) if "p_plast" in res else np.nan)
+    p = res["params"]
+    out.update({"P_" + k: v for k, v in plate_stats(res["plates"], p.size_um).items()})
     return out
 
 
