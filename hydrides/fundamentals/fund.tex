@@ -1,0 +1,113 @@
+\documentclass[11pt,a4paper,openany]{book}
+\usepackage[T2A]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[english,russian]{babel}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{textcomp}
+\usepackage{graphicx}
+\usepackage{booktabs,array,multirow,tabularx}
+\usepackage[dvipsnames]{xcolor}
+\usepackage[most]{tcolorbox}
+\usepackage{enumitem}
+\usepackage[font=small,labelfont={bf,color=ink},textfont={color=sub},margin=0.4cm]{caption}
+\usepackage[a4paper,top=2.3cm,bottom=2.4cm,left=2.4cm,right=2.4cm,headheight=14pt]{geometry}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{microtype}
+\usepackage[colorlinks=true,linkcolor=circ,urlcolor=circ,citecolor=circ]{hyperref}
+
+\graphicspath{{figs/}}
+
+% цвета — те же, что в рисунках и в учебнике по модели (../textbook)
+\definecolor{ink}{HTML}{1D1D1F}
+\definecolor{sub}{HTML}{5F6368}
+\definecolor{dim}{HTML}{9AA0A6}
+\definecolor{faint}{HTML}{EEF0F2}
+\definecolor{circ}{HTML}{2A6FDB}
+\definecolor{rad}{HTML}{D93A3A}
+\definecolor{load}{HTML}{D18B00}
+\definecolor{plast}{HTML}{7B4EA3}
+\definecolor{hydr}{HTML}{1E9E6A}
+\color{ink}
+
+\titleformat{\chapter}[display]
+  {\normalfont\color{ink}}
+  {\color{circ}\large\scshape \chaptertitlename\ \thechapter}
+  {6pt}
+  {\Huge\bfseries}
+  [\vspace{4pt}{\color{circ}\titlerule[1.2pt]}]
+\titlespacing*{\chapter}{0pt}{-10pt}{22pt}
+\titleformat{\section}{\normalfont\Large\bfseries\color{ink}}{\color{circ}\thesection}{0.8em}{}
+\titleformat{\subsection}{\normalfont\large\bfseries\color{ink}}{\color{sub}\thesubsection}{0.8em}{}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[LE]{\small\color{sub}\leftmark}
+\fancyhead[RO]{\small\color{sub}\rightmark}
+\fancyfoot[C]{\small\color{sub}\thepage}
+\renewcommand{\headrulewidth}{0pt}
+
+\setlist{itemsep=2pt,topsep=4pt}
+\setlength{\parskip}{3pt}
+
+% блоки
+\newtcolorbox{idea}[1][Интуиция]{enhanced,breakable,colback=circ!5,colframe=circ,boxrule=0pt,leftrule=3pt,arc=0pt,
+  title={#1},fonttitle=\bfseries\color{circ},coltitle=circ,colbacktitle=circ!5,attach title to upper={\ ---\ },
+  left=8pt,right=8pt,top=6pt,bottom=6pt}
+\newtcolorbox{keyf}[1][Главная формула]{enhanced,colback=white,colframe=load,boxrule=1.2pt,arc=4pt,
+  title={#1},fonttitle=\bfseries\small,coltitle=white,colbacktitle=load,left=8pt,right=8pt}
+\newtcolorbox{warnbox}[1][Осторожно]{enhanced,breakable,colback=rad!4,colframe=rad,boxrule=0pt,leftrule=3pt,arc=0pt,
+  title={#1},fonttitle=\bfseries\color{rad},coltitle=rad,colbacktitle=rad!4,attach title to upper={\ ---\ },left=8pt,right=8pt}
+\newtcolorbox{zrbox}[1][Для гидридов]{enhanced,breakable,colback=hydr!5,colframe=hydr,boxrule=0pt,leftrule=3pt,arc=0pt,
+  title={#1},fonttitle=\bfseries\color{hydr},coltitle=hydr,colbacktitle=hydr!5,attach title to upper={\ ---\ },
+  left=8pt,right=8pt,top=6pt,bottom=6pt}
+\newcounter{ex}[chapter]
+\renewcommand{\theex}{\thechapter.\arabic{ex}}
+\newtcolorbox{exercise}{enhanced,breakable,colback=faint,colframe=faint,boxrule=0pt,arc=3pt,
+  before upper={\refstepcounter{ex}\textbf{\color{sub}Упражнение \theex.}\ },left=8pt,right=8pt}
+
+\newcommand{\fig}[3][0.98]{\begin{figure}[htbp]\centering\includegraphics[width=#1\linewidth]{#2}\caption{#3}\label{fig:#2}\end{figure}}
+\newcommand{\eps}{\varepsilon}
+\newcommand{\TSSD}{\mathrm{TSSD}}
+\newcommand{\TSSP}{\mathrm{TSSP}}
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\degC}{\ifmmode{}^\circ\mathrm{C}\else\,\textdegree C\fi}
+
+\hypersetup{pdftitle={Фундамент: термодинамика, диффузия и превращения в металлах для модели гидридов циркония},
+  pdfauthor={ring-tests/hydrides}}
+
+\begin{document}
+\frontmatter
+\begin{titlepage}
+\centering
+\vspace*{3cm}
+{\color{circ}\large\scshape ring-tests / hydrides}\par\vspace{1.2cm}
+{\Huge\bfseries Фундамент\par}
+\vspace{0.6cm}
+{\Large термодинамика, диффузия, упругость и превращения\\ в металлах --- всё, что нужно,\\ чтобы понять модель гидридов циркония\par}
+\vspace{1.5cm}
+\includegraphics[width=0.85\linewidth]{f0_tube}\par
+\vspace{1.5cm}
+{\color{sub}Собственное изложение с рисунками, рассчитанными по формулам.\\
+Опирается на классические учебники (список в приложении В), но не пересказывает их.\par}
+\vfill
+{\color{sub}октябрь 2026\par}
+\end{titlepage}
+
+\tableofcontents
+
+\mainmatter
+\input{ch0_intro}
+\input{ch1_thermo}
+\input{ch2_solutions}
+\input{ch3_diffusion}
+\input{ch4_crystal}
+\input{ch5_elastic}
+\input{ch6_nucleation}
+\input{ch7_plasticity}
+\appendix
+\renewcommand{\thechapter}{\Asbuk{chapter}}
+\input{app_data}
+\input{app_answers}
+\input{app_reading}
+\end{document}
