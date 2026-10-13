@@ -1,51 +1,111 @@
 \chapter{Ответы и подсказки к упражнениям}
+\sloppy
 
-\subsection*{Глава 1}
-\textbf{1.1.} $\Delta G = \Delta H\Delta T/T_e$: 100 и 1000~Дж/моль. $RT$ при 990 и 900~К --- 8.2 и 7.5~кДж/моль, то есть
+\subsection*{Глава~\ref{ch:atoms}}
+\textbf{\ref{ch:atoms}.1.} $k = U''(r_0) = 2E_{\text{св}}\alpha^2$. Сила $F = -U'$ максимальна там, где $U'' = 0$: $e^{-\alpha(r-r_0)} = 1/2$,
+$r = r_0 + \ln2/\alpha$, $F_{\max} = \alpha E_{\text{св}}/2$. Отношение $(F_{\max}/r_0^2)/(k/r_0) = 1/(4\alpha r_0)\approx0.16$: теоретическая
+прочность --- порядка $E/6$--$E/10$.
+\textbf{\ref{ch:atoms}.2.} $C\approx0.27$~Дж/(г·К), на 100~К --- 27~Дж. Водорода 100~мкг $\approx10^{-4}$~моль, теплота растворения
+$\approx4$~Дж --- около 15\,\% от теплоты нагрева на 100~К, причём растянута на интервал растворения. Пик заметен, но фон
+надо учитывать точно.
+\textbf{\ref{ch:atoms}.3.} $f = 1/(1+e^{0.1/k_BT})$: 0.020 при 300~К ($k_BT = 0.0259$~эВ) и 0.13 при 600~К.
+
+\subsection*{Глава~\ref{ch:lattice}}
+\textbf{\ref{ch:lattice}.1.} $\operatorname{tg}\varphi = 1.1547\cdot1.593/7 = 0.263$, $\varphi\approx14.7^\circ$.
+\textbf{\ref{ch:lattice}.2.} ОЦК: $2\cdot\frac43\pi R^3/a^3$ с $a = 4R/\sqrt3$ даёт $\pi\sqrt3/8\approx0.68$. ГЦК: $4\cdot\frac43\pi R^3/a^3$ с
+$a = 2\sqrt2R$ даёт $\pi/(3\sqrt2)\approx0.74$.
+\textbf{\ref{ch:lattice}.3.} $d_{0002} = c/2 = 0.257$~нм, $d_{10\bar10} = \frac{\sqrt3}{2}a = 0.280$~нм, $d_{10\bar11} = 0.246$~нм.
+Призматические плоскости разнесены дальше базисных, пока $\frac{\sqrt3}{2}a > \frac c2$, то есть $c/a < \sqrt3\approx1.73$;
+у циркония 1.593. Правило грубое: у магния $c/a = 1.624$, а скольжение в основном базисное --- решает и электронная структура.
+\textbf{\ref{ch:lattice}.4.} ZrH$_{1.66}$: $1.66\cdot1.008/(91.22 + 1.67) = 1.80\,\%$, то есть 18\,000~ppm; ZrH$_2$: 2.16\,\%, 21\,600~ppm.
+
+\subsection*{Глава~\ref{ch:defects}}
+\textbf{\ref{ch:defects}.1.} $1.17^{1/3}-1\approx0.054$; дислокация примерно через каждые 18 плоскостей.
+\textbf{\ref{ch:defects}.2.} $\mu b^2/2\approx1.7\cdot10^{-9}$~Дж/м, то есть около 3.5~эВ на межатомное расстояние.
+\textbf{\ref{ch:defects}.3.} $b^2 = a^2$ до расщепления и $2\cdot a^2/3$ после --- выгодно. $|\mathbf b_p| = a/\sqrt3 = 0.187$~нм.
+\textbf{\ref{ch:defects}.4.} $\rho\mu b^2/2\approx1.7$~МДж/м$^3$; при мольном объёме циркония 14~см$^3$ --- около 24~Дж/моль. Это много меньше
+движущей силы выпадения в кДж на моль H: в среднем дислокации на термодинамику не влияют, но около их ядер энергия
+сосредоточена, и это облегчает зарождение (глава~\ref{ch:nucleation}).
+
+\subsection*{Глава~\ref{ch:methods}}
+\textbf{\ref{ch:methods}.1.} $d = c/2 = 0.2574$~нм; Cu: $\sin\theta = 0.2993$, $2\theta = 34.8^\circ$; Mo: $\sin\theta = 0.1377$, $2\theta = 15.8^\circ$.
+\textbf{\ref{ch:methods}.2.} $F = f\bigl(1 + e^{2\pi i(h/3 + 2k/3 + l/2)}\bigr)$. $(0001)$: $1 + e^{i\pi} = 0$ --- погашено. $(0002)$:
+$|F|^2 = 4f^2$. $(10\bar10)$: $|1 + e^{2\pi i/3}|^2 = 1$, $|F|^2 = f^2$. $(10\bar11)$: $|1 + e^{5\pi i/3}|^2 = 3$, $|F|^2 = 3f^2$.
+\textbf{\ref{ch:methods}.3.} $\beta = 0.9\cdot0.15406/(30\cos18.3^\circ)\approx4.9\cdot10^{-3}$~рад $\approx0.28^\circ$ --- в три с лишним раза
+больше инструментальной ширины, различимо.
+\textbf{\ref{ch:methods}.4.} Растворение при нагреве не требует зарождения и кончается, когда растворился последний гидрид, --- на
+равновесной линии. Выпадение требует пересыщения для зарождения и видно только при охлаждении. При быстром нагреве
+образец отстаёт от термопары и растворение не успевает --- измеренная TSSD завышается.
+
+\subsection*{Глава~\ref{ch:texture}}
+\textbf{\ref{ch:texture}.1.} $f_R = \cos^2\chi$, $f_T = \sin^2\chi$; равны при $\chi = 45^\circ$.
+\textbf{\ref{ch:texture}.2.} Ось $c$ в осях образца:
+$\mathbf c = (\sin90^\circ\sin30^\circ,\ -\cos90^\circ\sin30^\circ,\ \cos30^\circ) = (0.5,\ 0,\ 0.87)$ --- она отклонена
+от радиуса на 30\textdegree{} к оси трубы. Вклады: $f_R = 0.75$, $f_T = 0$, $f_A = 0.25$.
+\textbf{\ref{ch:texture}.3.} $\bar\alpha_d = \alpha_a + (\alpha_c - \alpha_a)f_d$: по радиусу $8.6\cdot10^{-6}$, по окружности $7.3\cdot10^{-6}$, по оси
+$5.7\cdot10^{-6}$~К$^{-1}$.
+
+\subsection*{Глава~\ref{ch:gibbs}}
+\textbf{\ref{ch:gibbs}.1.} $\Delta G = \Delta H\Delta T/T_e$: 100 и 1000~Дж/моль. $RT$ при 990 и 900~К --- 8.2 и 7.5~кДж/моль, то есть
 движущая сила меньше $RT$ в 82 и 7.5 раза.
-\textbf{1.2.} $\exp\bigl[\frac{Q}{R}\bigl(\frac1{573}-\frac1{673}\bigr)\bigr] = \exp(3.74)\approx42$.
-\textbf{1.3.} Вдоль линии равновесия $\dd G_\alpha = \dd G_\beta$, то есть $V_\alpha\dd p - S_\alpha\dd T = V_\beta\dd p -
+\textbf{\ref{ch:gibbs}.2.} $\exp\bigl[\frac{Q}{R}\bigl(\frac1{573}-\frac1{673}\bigr)\bigr] = \exp(3.74)\approx42$.
+\textbf{\ref{ch:gibbs}.3.} Вдоль линии равновесия $\dd G_\alpha = \dd G_\beta$, то есть $V_\alpha\dd p - S_\alpha\dd T = V_\beta\dd p -
 S_\beta\dd T$, откуда $\dd p/\dd T = \Delta S/\Delta V = \Delta H/(T\Delta V)$. Для напряжения роль $-p\,\dd V$ играет работа
-$V\sigma:\dd\eps$, и $\dd T/\dd\sigma = T\eps^*V/\Delta H$ --- формула главы~6.
+$V\sigma:\dd\eps$, и $\dd T/\dd\sigma = T\eps^*V/\Delta H$ --- формула главы~\ref{ch:nucleation}.
 
-\subsection*{Глава 2}
-\textbf{2.1.} $\mu_B = G - (X-1)\,\partial G/\partial X$ даёт $G_B + \Omega(1-X)^2 + RT\ln X$.
-\textbf{2.2.} $Q = 2.24\cdot10^3\cdot\ln10\cdot R \approx 42.9$~кДж/моль. $T = 2240/(5.56-\lg C)$: 100~ppm --- 356\degC,
+\subsection*{Глава~\ref{ch:solutions}}
+\textbf{\ref{ch:solutions}.1.} $\mu_B = G - (X-1)\,\partial G/\partial X$ даёт $G_B + \Omega(1-X)^2 + RT\ln X$.
+\textbf{\ref{ch:solutions}.2.} $Q = 2.24\cdot10^3\cdot\ln10\cdot R \approx 42.9$~кДж/моль. $T = 2240/(5.56-\lg C)$: 100~ppm --- 356\degC,
 300~ppm --- 453\degC, 600~ppm --- 532\degC (почти эвтектоид).
-\textbf{2.3.} $\Delta g = R\ln10\,(560 - 0.48\,T)$~Дж/моль: 6.4~кДж/моль при 200\degC, 5.5 при 300\degC, 4.5 при
+\textbf{\ref{ch:solutions}.3.} $\Delta g = R\ln10\,(560 - 0.48\,T)$~Дж/моль: 6.4~кДж/моль при 200\degC, 5.5 при 300\degC, 4.5 при
 400\degC. Падает с температурой: при высокой $T$ пластичность и возврат легче, и матрица «берёт» с гидрида меньше.
-\textbf{2.4.} $C_\TSSD(400\degC)\approx171$~ppm растворено; около 129~ppm остаётся в гидридах. Выпадение начнётся на TSSP
+\textbf{\ref{ch:solutions}.4.} $C_\TSSD(400\degC)\approx171$~ppm растворено; около 129~ppm остаётся в гидридах. Выпадение начнётся на TSSP
 при 171~ppm: $T = 1680/(5.08-\lg171)\approx 317\degC$.
 
-\subsection*{Глава 3}
-\textbf{3.1.} $D(350\degC)\approx1.5\cdot10^{-10}$~м$^2$/с. $t\sim L^2/D$: для 0.65~мм около 50~мин, для 50~мкм около 17~с.
-\textbf{3.2.} $\mathbf J = 0$ при $\nabla\ln c = (\bar V/RT)\nabla\sigma_h$. При 600~МПа и 300\degC: $e^{0.21}\approx1.24$.
-\textbf{3.3.} $g = 1 - 4r\sin^2(k\Delta x/2)$; $|g|\le1$ при $r\le1/2$.
+\subsection*{Глава~\ref{ch:diagrams}}
+\textbf{\ref{ch:diagrams}.1.} В эвтектоиде $F = 2 - 3 + 1 = 0$: температура и составы всех трёх фаз фиксированы. В области $\alpha+\delta$ $F = 1$:
+при заданной температуре составы фаз определены. Поэтому в равновесии выпадение в сплаве с данным водородом начинается
+при одной определённой температуре --- на линии растворимости.
+\textbf{\ref{ch:diagrams}.2.} $f_L = (0.47 - 0.45)/(0.47 - 0.40)\approx0.29$.
+\textbf{\ref{ch:diagrams}.3.} $(0.30 - 0.11)/(0.58 - 0.11)\approx0.40$.
+\textbf{\ref{ch:diagrams}.4.} При 400\degC{} растворено 171~ppm (глава~\ref{ch:solutions}); при охлаждении до комнатной температуры они
+выпадут почти целиком: $171/18\,000\approx0.95\,\%$ по массе нового гидрида (всего гидрида 1.7\,\%). По TSSD при 300\degC{}
+в растворе 45~ppm, так что до 300\degC{} выпадет $126/171\approx74\,\%$ растворённого водорода.
 
-\subsection*{Глава 4}
-\textbf{4.1.} $\operatorname{tg}\varphi = 1.1547\cdot1.593/7 = 0.263$, $\varphi\approx14.7^\circ$.
-\textbf{4.2.} $1.17^{1/3}-1\approx0.054$; дислокация примерно через каждые 18 плоскостей.
-\textbf{4.3.} $\mu b^2/2\approx1.7\cdot10^{-9}$~Дж/м, то есть около 3.5~эВ на межатомное расстояние.
+\subsection*{Глава~\ref{ch:diffusion}}
+\textbf{\ref{ch:diffusion}.1.} $D(350\degC)\approx1.5\cdot10^{-10}$~м$^2$/с. $t\sim L^2/D$: для 0.65~мм около 50~мин, для 50~мкм около 17~с.
+\textbf{\ref{ch:diffusion}.2.} $\mathbf J = 0$ при $\nabla\ln c = (\bar V/RT)\nabla\sigma_h$. При 600~МПа и 300\degC: $e^{0.21}\approx1.24$.
+\textbf{\ref{ch:diffusion}.3.} $g = 1 - 4r\sin^2(k\Delta x/2)$; $|g|\le1$ при $r\le1/2$.
 
-\subsection*{Глава 5}
-\textbf{5.1.} $\sigma^{\text{вн}} = 3K(s-1)\eps\,\mathbf I$, $s = \frac{1+\nu}{3(1-\nu)}$; $W = \frac92K(1-s)\eps^2V = \frac{E}{1-\nu}\eps^2V$.
-\textbf{5.2.} В пластинке $\eps^{\text{полн}}_{tt} = \eps^{\text{полн}}_{ss} = 0$, $\sigma_{nn} = \sigma_{nt} = \sigma_{ns} = 0$:
+\subsection*{Глава~\ref{ch:elastic}}
+\textbf{\ref{ch:elastic}.1.} $\sigma^{\text{вн}} = 3K(s-1)\eps\,\mathbf I$, $s = \frac{1+\nu}{3(1-\nu)}$; $W = \frac92K(1-s)\eps^2V = \frac{E}{1-\nu}\eps^2V$.
+\textbf{\ref{ch:elastic}.2.} В пластинке $\eps^{\text{полн}}_{tt} = \eps^{\text{полн}}_{ss} = 0$, $\sigma_{nn} = \sigma_{nt} = \sigma_{ns} = 0$:
 плоское напряжённое состояние с упругой деформацией $-\eps^*$ в плоскости; $w = \frac12\sigma:\eps_{\text{упр}}$.
-\textbf{5.3.} $\eps_{tt} = 0.0476$; $w\approx297$~МДж/м$^3$, около 3.0~кДж/моль~H.
-\textbf{5.4.} Ось $c$ по окружности: $(120\cdot0.072 + 60\cdot0.046)\cdot10 \approx 114$~Дж/моль. Ось $c$ по радиусу:
+\textbf{\ref{ch:elastic}.3.} $\eps_{tt} = 0.0476$; $w\approx297$~МДж/м$^3$, около 3.0~кДж/моль~H.
+\textbf{\ref{ch:elastic}.4.} Ось $c$ по окружности: $(120\cdot0.072 + 60\cdot0.046)\cdot10 \approx 114$~Дж/моль. Ось $c$ по радиусу:
 $(120\cdot0.046 + 60\cdot0.046)\cdot10\approx 82$~Дж/моль.
 
-\subsection*{Глава 6}
-\textbf{6.1.} $r^* = 2\gamma/\Delta g$, $\Delta G^* = 16\pi\gamma^3/(3\Delta g^2)$; при $\Delta g\to0.8\Delta g$ барьер растёт в
+\subsection*{Глава~\ref{ch:nucleation}}
+\textbf{\ref{ch:nucleation}.1.} $r^* = 2\gamma/\Delta g$, $\Delta G^* = 16\pi\gamma^3/(3\Delta g^2)$; при $\Delta g\to0.8\Delta g$ барьер растёт в
 $1/0.64\approx1.56$ раза.
-\textbf{6.2.} Объём линзы $V = \frac43\pi R^3 S(\theta)$, площадь межфазной поверхности и заменённой границы дают тот же
+\textbf{\ref{ch:nucleation}.2.} Объём линзы $V = \frac43\pi R^3 S(\theta)$, площадь межфазной поверхности и заменённой границы дают тот же
 множитель в барьере.
-\textbf{6.3.} $\delta T\approx0.013\cdot150\approx2$~К по упругой оценке, $\approx12$~К по измеренному сдвигу; полоса гистерезиса ---
+\textbf{\ref{ch:nucleation}.3.} $\delta T\approx0.013\cdot150\approx2$~К по упругой оценке, $\approx12$~К по измеренному сдвигу; полоса гистерезиса ---
 около 80~К.
-\textbf{6.4.} $f_{\text{расш}} = N\frac43\pi v^3t^3$, $n = 3$.
+\textbf{\ref{ch:nucleation}.4.} $f_{\text{расш}} = N\frac43\pi v^3t^3$, $n = 3$.
 
-\subsection*{Глава 7}
-\textbf{7.1.} Мизес: $\sigma_\theta = 2\sigma_y/\sqrt3\approx1.155\sigma_y$; Треска ($\sigma_r\approx0$): $\sigma_\theta = \sigma_y$; разница 15\,\%.
-\textbf{7.2.} $\sigma_{rr} = -4\mu B/r^3$, $\sigma_{\theta\theta} = 2\mu B/r^3$; текучесть на $r = c$: $6\mu B/c^3 = \sigma_y$;
+\subsection*{Глава~\ref{ch:mech}}
+\textbf{\ref{ch:mech}.1.} $\dd\sigma/\dd\eps = nK\eps^{n-1} = K\eps^n$ даёт $\eps = n$. Условное напряжение $s = \sigma/(1+e) = \sigma e^{-\eps}$, откуда
+$\sigma_{\text{в}} = Kn^ne^{-n}$; для $K = 750$~МПа, $n = 0.1$ --- 539~МПа.
+\textbf{\ref{ch:mech}.2.} $a = \frac1\pi\bigl(K_c/1.12\sigma\bigr)^2\approx0.63$~мм --- порядка толщины стенки: на деле опаснее цепочки гидридов,
+уже пересёкшие часть стенки.
+\textbf{\ref{ch:mech}.3.} $\dot\sigma = -EA\sigma^n$; разделяя переменные, $\sigma^{1-n} - \sigma_0^{1-n} = (n-1)EAt$. Половина --- при
+$t_{1/2} = (2^{n-1} - 1)/\bigl((n-1)EA\sigma_0^{n-1}\bigr)$, для $n = 5$ --- $15/(4EA\sigma_0^4)$.
+
+\subsection*{Глава~\ref{ch:plasticity}}
+\textbf{\ref{ch:plasticity}.1.} Мизес: $\sigma_\theta = 2\sigma_y/\sqrt3\approx1.155\sigma_y$; Треска ($\sigma_r\approx0$): $\sigma_\theta = \sigma_y$; разница 15\,\%.
+\textbf{\ref{ch:plasticity}.2.} Для призмы с нормалью под углом $\alpha_k = 30^\circ + 60^\circ k$ к $\mathbf a_1$ направление скольжения
+перпендикулярно нормали в базисе, и $m_k = |\cos(\psi - \alpha_k)\sin(\psi - \alpha_k)| = \tfrac12|\sin2(\psi - \alpha_k)|$. Наибольший из трёх:
+0.433 при $\psi = 0$ и $30^\circ$ (нагрузка вдоль $\langle11\bar20\rangle$ или $\langle10\bar10\rangle$), 0.5 при $\psi = 15^\circ$.
+\textbf{\ref{ch:plasticity}.3.} $\sigma_{rr} = -4\mu B/r^3$, $\sigma_{\theta\theta} = 2\mu B/r^3$; текучесть на $r = c$: $6\mu B/c^3 = \sigma_y$;
 несжимаемость: $a^2u(a) = c^2u(c) = B$, $u(a) = \delta a$.
-\textbf{7.3.} $f_r = \cos^2\chi$, $f_\theta = \sin^2\chi$; равны при $\chi = 45^\circ$.

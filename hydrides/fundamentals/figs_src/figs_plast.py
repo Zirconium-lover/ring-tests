@@ -82,14 +82,10 @@ def f_zone():
 
 
 def f_texture():
-    """Текстура трубы (схема): оси c наклонены от радиального направления к окружному на ±χ0 с разбросом;
+    """Текстура трубы (схема texture_model): оси c наклонены от радиального направления к окружному на ±35° с разбросом;
     а) полюсная фигура (0002) в равноплощадной проекции, центр — радиальное направление; б) факторы Кернса."""
-    rng = np.random.default_rng(5)
-    n = 4000
-    chi = rng.choice([-1, 1], n) * rng.normal(35, 12, n)          # наклон от r к θ, °
-    eta = rng.normal(0, 10, n)                                    # отклонение к оси трубы, °
-    c = np.radians(chi); e = np.radians(eta)
-    v = np.stack([np.cos(c) * np.cos(e), np.sin(c) * np.cos(e), np.sin(e)], 1)    # (r, θ, z)
+    import texture_model as tm                                   # та же схематичная текстура, что в главе «Текстура»
+    v = tm.sample(4000, seed=5)[:, :, 2].copy()                    # оси c в осях (r, θ, z)
     v[v[:, 0] < 0] *= -1
     fr, ft, fa = (v ** 2).mean(0)
     fig, (a, b) = plt.subplots(1, 2, figsize=(W1, 2.6), gridspec_kw=dict(width_ratios=[1, 1.05]))
@@ -98,13 +94,13 @@ def f_texture():
     rho = np.sqrt(2) * np.sin(ang / 2)
     az = np.arctan2(v[:, 2], v[:, 1])
     X, Y = rho * np.cos(az), rho * np.sin(az)
-    a.hexbin(X, Y, gridsize=28, extent=(-1.42, 1.42, -1.42, 1.42), cmap="Blues", mincnt=1, linewidths=0)
-    a.add_patch(Circle((0, 0), np.sqrt(2), fill=False, ec=SUB, lw=0.8))
-    a.annotate("", xy=(1.62, 0), xytext=(1.42, 0), arrowprops=dict(arrowstyle="->", color=INK))
-    a.text(1.66, 0.08, r"$\theta$", color=INK); a.text(0.06, 1.5, r"$z$ (ось трубы)", color=INK, fontsize=8)
-    a.text(-0.08, -0.12, r"$r$", color=INK, ha="right")
+    a.hexbin(X, Y, gridsize=24, extent=(-1.02, 1.02, -1.02, 1.02), cmap="Blues", mincnt=1, linewidths=0)
+    a.add_patch(Circle((0, 0), 1.0, fill=False, ec=SUB, lw=0.8))
+    a.annotate("", xy=(1.2, 0), xytext=(1.0, 0), arrowprops=dict(arrowstyle="->", color=INK))
+    a.text(1.24, 0.06, r"$\theta$", color=INK); a.text(0.05, 1.08, r"$z$ (ось трубы)", color=INK, fontsize=8)
+    a.text(-0.06, -0.1, r"$r$", color=INK, ha="right")
     a.plot(0, 0, "+", color=INK, ms=6)
-    a.set_aspect("equal"); a.set_xlim(-1.75, 1.8); a.set_ylim(-1.6, 1.65); a.axis("off"); label(a, "а", 0.08, 0.97)
+    a.set_aspect("equal"); a.set_xlim(-1.3, 1.35); a.set_ylim(-1.2, 1.25); a.axis("off"); label(a, "а", 0.08, 0.97)
     names = [r"$f_r$ (радиальное)", r"$f_\theta$ (окружное)", r"$f_z$ (осевое)"]
     vals = [fr, ft, fa]
     b.bar(range(3), vals, color=[RAD, CIRC, DIM], width=0.6)

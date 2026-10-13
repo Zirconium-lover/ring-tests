@@ -37,6 +37,7 @@
   {\Huge\bfseries}
   [\vspace{4pt}{\color{circ}\titlerule[1.2pt]}]
 \titlespacing*{\chapter}{0pt}{-10pt}{22pt}
+\titleformat{\part}[display]{\normalfont\centering\color{ink}}{\color{circ}\LARGE\scshape \partname\ \thepart}{14pt}{\Huge\bfseries}
 \titleformat{\section}{\normalfont\Large\bfseries\color{ink}}{\color{circ}\thesection}{0.8em}{}
 \titleformat{\subsection}{\normalfont\large\bfseries\color{ink}}{\color{sub}\thesubsection}{0.8em}{}
 
@@ -73,7 +74,7 @@
 \newcommand{\dd}{\mathrm{d}}
 \newcommand{\degC}{\ifmmode{}^\circ\mathrm{C}\else\,\textdegree C\fi}
 
-\hypersetup{pdftitle={Фундамент: термодинамика, диффузия и превращения в металлах для модели гидридов циркония},
+\hypersetup{pdftitle={Фундамент: материаловедение для модели гидридов циркония},
   pdfauthor={ring-tests/hydrides}}
 
 \begin{document}
@@ -84,7 +85,7 @@
 {\color{circ}\large\scshape ring-tests / hydrides}\par\vspace{1.2cm}
 {\Huge\bfseries Фундамент\par}
 \vspace{0.6cm}
-{\Large термодинамика, диффузия, упругость и превращения\\ в металлах --- всё, что нужно,\\ чтобы понять модель гидридов циркония\par}
+{\Large строение металлов, методы исследования,\\ фазовые равновесия, диффузия, упругость, превращения\\ и механика --- всё, что нужно,\\ чтобы понять модель гидридов циркония\par}
 \vspace{1.5cm}
 \includegraphics[width=0.85\linewidth]{f0_tube}\par
 \vspace{1.5cm}
@@ -97,14 +98,25 @@
 \tableofcontents
 
 \mainmatter
-\input{ch0_intro}
-\input{ch1_thermo}
-\input{ch2_solutions}
-\input{ch3_diffusion}
-\input{ch4_crystal}
-\input{ch5_elastic}
-\input{ch6_nucleation}
-\input{ch7_plasticity}
+\input{ch00_intro}
+\part{Строение твёрдого тела}
+\input{ch01_atoms}
+\input{ch02_lattice}
+\input{ch03_defects}
+\input{ch04_methods}
+\input{ch05_texture}
+\part{Термодинамика и фазовые равновесия}
+\input{ch06_gibbs}
+\input{ch07_solutions}
+\input{ch08_diagrams}
+\part{Диффузия и превращения}
+\input{ch09_diffusion}
+\input{ch10_elastic}
+\input{ch11_nucleation}
+\part{Механика}
+\input{ch12_mech}
+\input{ch13_plasticity}
+\input{ch14_summary}
 \appendix
 \renewcommand{\thechapter}{\Asbuk{chapter}}
 \input{app_data}
